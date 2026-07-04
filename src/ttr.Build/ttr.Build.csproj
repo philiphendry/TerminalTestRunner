@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ttr.Build</RootNamespace>
+    <AssemblyName>ttr.Build</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Empty placeholder for Phase 1. MSBuild/build subsystem arrives in Phase 3. -->
+
+</Project>

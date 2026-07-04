@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Ttr.Cli</RootNamespace>
+    <AssemblyName>ttr</AssemblyName>
+    <ToolCommandName>ttr</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
+    <ProjectReference Include="../ttr.Ui/ttr.Ui.csproj" />
+    <ProjectReference Include="../ttr.Runners/ttr.Runners.csproj" />
+    <ProjectReference Include="../ttr.Build/ttr.Build.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+</Project>

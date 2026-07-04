@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ttr.Runners</RootNamespace>
+    <AssemblyName>ttr.Runners</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
+  </ItemGroup>
+
+</Project>

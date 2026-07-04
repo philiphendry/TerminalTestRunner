@@ -1,0 +1,19 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.{cs,csproj,props,targets}]
+indent_size = 4
+
+[*.{json,yml,yaml,md,slnx}]
+indent_size = 2
+
+[*.cs]
+# Keep the warnings-as-errors gate meaningful: enforce a few high-signal analyzers.
+dotnet_diagnostic.CA1707.severity = none   # underscores in test names are fine
+dotnet_diagnostic.CA1051.severity = none

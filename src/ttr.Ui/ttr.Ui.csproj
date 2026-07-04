@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ttr.Ui</RootNamespace>
+    <AssemblyName>ttr.Ui</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Spectre.Console is used ONLY as a measuring library (Segment.CellCount). -->
+    <PackageReference Include="Spectre.Console" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>TtrParser</RootNamespace>
+    <AssemblyName>TtrParser</AssemblyName>
+  </PropertyGroup>
+
+  <!--
+    Empty placeholder. The POC-9 file-reference parser + corpus were NOT present in the
+    Phase 1 seed, so per the brief (Milestone 0.3) we create the empty project and do not
+    reimplement the parser. It will be lifted verbatim when the artifacts are available.
+  -->
+
+</Project>

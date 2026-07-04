@@ -1,0 +1,25 @@
+## .NET / build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+
+## Test / coverage
+TestResults/
+*.trx
+*.coverage
+coverage*.json
+
+## IDE
+.vs/
+.idea/
+.vscode/
+
+## Verify (received snapshots, if used later)
+*.received.*
+
+## OS
+.DS_Store
+Thumbs.db

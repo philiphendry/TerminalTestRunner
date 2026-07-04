@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Ttr.Core</RootNamespace>
+    <AssemblyName>ttr.Core</AssemblyName>
+  </PropertyGroup>
+
+  <!-- ttr.Core has NO rendering/terminal/UI dependencies by design (CLAUDE.md invariant). -->
+
+</Project>
