@@ -26,12 +26,16 @@ public static class App
         var channel = Channel.CreateUnbounded<AppEvent>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
-        var loop = new ReducerLoop(AppState.Initial(scenario));
         var metrics = new RenderMetrics();
         var adapter = new FakeAdapter(scenario, seed);
         var target = new TestTarget(scenario);
 
         using var cts = new CancellationTokenSource();
+
+        // The orchestrator launches side effects (reruns, 'o' highlighting, toast expiry) in reaction
+        // to reducer-produced state; the reducer loop invokes it after each change (plan invariant 1).
+        var orchestrator = new Orchestrator(adapter, target, channel.Writer, cts.Token);
+        var loop = new ReducerLoop(AppState.Initial(scenario), orchestrator.OnReduced);
         using var shell = new AnsiConsoleShell();
         shell.Enter();
         try

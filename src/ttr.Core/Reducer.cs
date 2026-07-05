@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using TtrParser;
 
 namespace Ttr.Core;
 
@@ -28,6 +29,8 @@ public static class Reducer
             AppEvent.RunCompleted => RunCompleted(s),
             AppEvent.Resized r => Resized(s, r),
             AppEvent.KeyPressed k => Key(s, k.Key),
+            AppEvent.HighlightReady h => HighlightReady(s, h),
+            AppEvent.ToastExpired t => ToastExpired(s, t),
             AppEvent.FatalError f => Fatal(s, f),
             _ => s,
         };
@@ -81,16 +84,23 @@ public static class Reducer
         });
         SetDuration(leaf, t.Duration);
         AttachDetail(leaf, t.Detail);
+
+        // Under the failed-only filter a pass changes which rows are visible (vanish-on-pass), so the
+        // published snapshot must be rebuilt even when the tree structure did not change (brief M3).
+        var prevIndex = CurrentIndex(s);
         var next = s with
         {
             Expanded = expanded.ToImmutable(),
             TreeVersion = structural ? s.TreeVersion + 1 : s.TreeVersion,
         };
-        return structural ? RebuildRows(next) : next;
+        if (structural || s.FailedOnly)
+            next = NormalizeView(RebuildRows(next), prevIndex);
+        return next;
     }
 
-    /// <summary>Recompute the published row snapshot from the current tree + expansion (reducer thread only).</summary>
-    private static AppState RebuildRows(AppState s) => s with { Rows = TreeFlattener.Flatten(s.Root, s.Expanded) };
+    /// <summary>Recompute the published row snapshot from the current tree + expansion + filter (reducer thread only).</summary>
+    private static AppState RebuildRows(AppState s) =>
+        s with { Rows = TreeFlattener.Flatten(s.Root, s.Expanded, s.FailedOnly) };
 
     private static AppState RunCompleted(AppState s)
     {
@@ -99,15 +109,33 @@ public static class Reducer
         foreach (var leaf in Leaves(s.Root))
             if (leaf.Status == TestStatus.Running)
                 ApplyStatus(leaf, TestStatus.NotRun);
-        return s with { Running = false };
+
+        var next = s with { Running = false };
+
+        // Coalesced follow-up (plan §9): reruns requested while this run was active launch now, once.
+        if (s.QueuedRerunAll || !s.QueuedRerun.IsEmpty)
+        {
+            var subset = s.QueuedRerunAll ? [] : (IReadOnlyList<TestCaseId>)s.QueuedRerun.ToArray();
+            next = LaunchRun(next, subset)
+                with { QueuedRerun = ImmutableHashSet<TestCaseId>.Empty, QueuedRerunAll = false };
+        }
+
+        // Filter view may need a rebuild after the final sweep.
+        return s.FailedOnly ? NormalizeView(RebuildRows(next), CurrentIndex(s)) : next;
     }
 
     // --- Resize -----------------------------------------------------------------
 
     private static AppState Resized(AppState s, AppEvent.Resized r)
     {
-        // Chrome = 1 header line + 1 footer line. Never negative.
-        var viewport = Math.Max(0, r.Height - 2);
+        if (r.Width == s.Width && r.Height == s.Height) return s;
+        return Relayout(s with { Width = r.Width, Height = r.Height });
+    }
+
+    /// <summary>Recompute the tree viewport from the current size + pane flags and re-clamp scroll.</summary>
+    private static AppState Relayout(AppState s)
+    {
+        var viewport = Layout.TreeViewportRows(s, s.Width, s.Height);
         var idx = CurrentIndex(s);
         var scroll = ClampScroll(s.ScrollOffset, idx, viewport, s.Rows.Count);
         return s with { Viewport = viewport, ScrollOffset = scroll };
@@ -117,34 +145,55 @@ public static class Reducer
 
     private static AppState Key(AppState s, ConsoleKeyInfo k)
     {
-        // Ctrl+C → 130 (checked before char handling; KeyChar for Ctrl+C is unreliable).
+        // Ctrl+C → 130 everywhere (checked first; KeyChar for Ctrl+C is unreliable).
         if (k.Key == ConsoleKey.C && (k.Modifiers & ConsoleModifiers.Control) != 0)
             return s with { ShouldQuit = true, ExitCode = 130 };
 
+        // The 'o' modal captures ALL input while open (plan §11.3).
+        if (s.Modal is not null) return ModalKey(s, k);
+
+        // The help overlay closes on any key.
+        if (s.HelpVisible) return s with { HelpVisible = false };
+
+        return MainKey(s, k);
+    }
+
+    private static AppState MainKey(AppState s, ConsoleKeyInfo k)
+    {
+        var detailFocused = s.DetailVisible && s.Focus == PaneFocus.Detail;
+
         switch (k.Key)
         {
-            case ConsoleKey.UpArrow: return Move(s, -1);
-            case ConsoleKey.DownArrow: return Move(s, +1);
-            case ConsoleKey.PageUp: return Move(s, -Math.Max(1, s.Viewport));
-            case ConsoleKey.PageDown: return Move(s, +Math.Max(1, s.Viewport));
-            case ConsoleKey.Home: return MoveTo(s, 0);
-            case ConsoleKey.End: return MoveTo(s, int.MaxValue);
-            case ConsoleKey.RightArrow: return ExpandOrDescend(s);
-            case ConsoleKey.LeftArrow: return CollapseOrAscend(s);
+            case ConsoleKey.UpArrow: return detailFocused ? DetailScroll(s, -1) : Move(s, -1);
+            case ConsoleKey.DownArrow: return detailFocused ? DetailScroll(s, +1) : Move(s, +1);
+            case ConsoleKey.PageUp:
+                return detailFocused ? DetailScroll(s, -DetailPage(s)) : Move(s, -Math.Max(1, s.Viewport));
+            case ConsoleKey.PageDown:
+                return detailFocused ? DetailScroll(s, +DetailPage(s)) : Move(s, +Math.Max(1, s.Viewport));
+            case ConsoleKey.Home: return detailFocused ? DetailScrollTo(s, 0) : MoveTo(s, 0);
+            case ConsoleKey.End: return detailFocused ? DetailScrollTo(s, int.MaxValue) : MoveTo(s, int.MaxValue);
+            case ConsoleKey.RightArrow: return detailFocused ? s : ExpandOrDescend(s);
+            case ConsoleKey.LeftArrow: return detailFocused ? s : CollapseOrAscend(s);
+            case ConsoleKey.Tab: return s.DetailVisible ? ToggleFocus(s) : s;
+            case ConsoleKey.Escape: return s;
         }
 
         switch (k.KeyChar)
         {
             case 'q': return s with { ShouldQuit = true, ExitCode = 0 };
-            case 'k': return Move(s, -1);
-            case 'j': return Move(s, +1);
+            case 'k': return detailFocused ? DetailScroll(s, -1) : Move(s, -1);
+            case 'j': return detailFocused ? DetailScroll(s, +1) : Move(s, +1);
             case 'e': return ToggleExpand(s, recursive: false);
             case 'E': return ToggleExpand(s, recursive: true);   // Shift+E → uppercase KeyChar
-            case '?':
-                return s with
-                {
-                    FooterMessage = "Help arrives in Phase 2 — ↑/↓ j/k move · →/← e/E expand · q quit",
-                };
+            case 's': return ToggleDetail(s);
+            case 'b': return ToggleOrientation(s);
+            case 'w': return s.DetailVisible ? s with { WordWrap = !s.WordWrap } : s;
+            case 'f': return ToggleFailedOnly(s);
+            case 't': return s with { ShowDurations = !s.ShowDurations };
+            case 'r': return Rerun(s, rooted: false);
+            case 'R': return Rerun(s, rooted: true);
+            case 'o': return OpenModal(s);
+            case '?': return s with { HelpVisible = true };
         }
 
         return s;
@@ -222,10 +271,9 @@ public static class Reducer
     /// <summary>Apply a new expansion set, rebuild rows, bump the version, and keep the selection in view.</summary>
     private static AppState SetExpansion(AppState s, ImmutableHashSet<TestCaseId> expanded)
     {
+        var prevIndex = CurrentIndex(s);
         var afterState = RebuildRows(s with { Expanded = expanded, TreeVersion = s.TreeVersion + 1 });
-        var idx = CurrentIndex(afterState);
-        var scroll = ClampScroll(afterState.ScrollOffset, idx, afterState.Viewport, afterState.Rows.Count);
-        return afterState with { ScrollOffset = scroll };
+        return NormalizeView(afterState, prevIndex);
     }
 
     private static AppState SelectId(AppState s, TestCaseId id)
@@ -237,6 +285,208 @@ public static class Reducer
 
     private static AppState Fatal(AppState s, AppEvent.FatalError f)
         => s with { FatalMessage = f.Message, ShouldQuit = true, ExitCode = 1 };
+
+    // --- View toggles (M2/M3) ---------------------------------------------------
+
+    private static AppState ToggleDetail(AppState s)
+    {
+        var open = !s.DetailVisible;
+        return Relayout(s with { DetailVisible = open, Focus = open ? s.Focus : PaneFocus.Tree, DetailScroll = 0 });
+    }
+
+    private static AppState ToggleOrientation(AppState s) =>
+        Relayout(s with
+        {
+            DetailOrientation = s.DetailOrientation == DetailOrientation.Right
+                ? DetailOrientation.Beneath
+                : DetailOrientation.Right,
+        });
+
+    private static AppState ToggleFocus(AppState s) =>
+        s with { Focus = s.Focus == PaneFocus.Tree ? PaneFocus.Detail : PaneFocus.Tree };
+
+    private static AppState ToggleFailedOnly(AppState s)
+    {
+        var prevIndex = CurrentIndex(s);
+        var ns = s with { FailedOnly = !s.FailedOnly, DetailScroll = 0 };
+        return NormalizeView(RebuildRows(ns), prevIndex);
+    }
+
+    // --- Detail-pane scroll (M2) ------------------------------------------------
+
+    private static int DetailPage(AppState s) => Math.Max(1, Layout.DetailViewportRows(s, s.Width, s.Height));
+
+    private static int DetailContentCount(AppState s)
+    {
+        var (node, _) = Selected(s);
+        return node is null ? 0 : DetailComposer.Compose(node).Count;
+    }
+
+    private static AppState DetailScroll(AppState s, int delta) => DetailScrollTo(s, s.DetailScroll + delta);
+
+    private static AppState DetailScrollTo(AppState s, int index)
+    {
+        // Clamp against the logical line count (exact when wrap is off; conservative when on). The
+        // renderer clamps the display slice cell-accurately too.
+        var max = Math.Max(0, DetailContentCount(s) - DetailPage(s));
+        var scroll = Math.Clamp(index, 0, max);
+        return scroll == s.DetailScroll ? s : s with { DetailScroll = scroll };
+    }
+
+    // --- Rerun (M4) -------------------------------------------------------------
+
+    private static AppState Rerun(AppState s, bool rooted)
+    {
+        var root = rooted ? s.Root : Selected(s).Node ?? s.Root;
+        // Under 'f' the rerun set is the filter's visible set: currently-failed leaves plus any
+        // already in-flight (Queued/Running) so a second r/R mid-run coalesces the same set.
+        var targets = Leaves(root)
+            .Where(l => !s.FailedOnly || l.Status is TestStatus.Failed or TestStatus.Queued or TestStatus.Running)
+            .ToList();
+        if (targets.Count == 0) return Toast(s, "nothing to rerun");
+
+        // A rooted rerun with no filter reruns everything → empty subset (adapter runs all).
+        var runAll = rooted && !s.FailedOnly;
+        IReadOnlyList<TestCaseId> subset = runAll ? [] : targets.Select(l => l.Id).ToList();
+
+        if (s.Running)
+        {
+            // Coalesce into one consolidated follow-up run (plan §9).
+            var queued = runAll
+                ? s with { QueuedRerunAll = true }
+                : s with { QueuedRerun = s.QueuedRerun.Union(subset) };
+            return Toast(queued, "rerun queued");
+        }
+
+        foreach (var leaf in targets) ApplyStatus(leaf, TestStatus.Queued);
+        return LaunchRun(s, subset);
+    }
+
+    /// <summary>Request a run launch (the orchestrator dispatches each new generation once).</summary>
+    private static AppState LaunchRun(AppState s, IReadOnlyList<TestCaseId> subset) =>
+        s with { RunGeneration = s.RunGeneration + 1, RunSubset = subset, Running = true };
+
+    // --- 'o' modal (M5) ---------------------------------------------------------
+
+    private static AppState OpenModal(AppState s)
+    {
+        var (node, _) = Selected(s);
+        if (node is null || !node.HasResolvedRefs) return Toast(s, "no file references");
+        return s with { Modal = BuildModal(s, node.FileRefs, FirstResolvedIndex(node.FileRefs)) };
+    }
+
+    private static AppState ModalKey(AppState s, ConsoleKeyInfo k)
+    {
+        var m = s.Modal!;
+        switch (k.Key)
+        {
+            case ConsoleKey.Escape: return s with { Modal = null };
+            case ConsoleKey.UpArrow: return ModalScrollTo(s, m.Scroll - 1);
+            case ConsoleKey.DownArrow: return ModalScrollTo(s, m.Scroll + 1);
+            case ConsoleKey.PageUp: return ModalScrollTo(s, m.Scroll - ModalPage(s));
+            case ConsoleKey.PageDown: return ModalScrollTo(s, m.Scroll + ModalPage(s));
+            case ConsoleKey.Home: return ModalScrollTo(s, 0);
+            case ConsoleKey.End: return ModalScrollTo(s, int.MaxValue);
+        }
+
+        switch (k.KeyChar)
+        {
+            case 'c': return s with { Modal = null };
+            case 'n': return s with { Modal = BuildModal(s, m.Refs, Step(m.Refs, m.Index, +1)) };
+            case 'p': return s with { Modal = BuildModal(s, m.Refs, Step(m.Refs, m.Index, -1)) };
+            case 'w': return s with { Modal = m with { Wrap = !m.Wrap } };
+            case 'k': return ModalScrollTo(s, m.Scroll - 1);
+            case 'j': return ModalScrollTo(s, m.Scroll + 1);
+        }
+        return s;
+    }
+
+    private static int ModalPage(AppState s) => Math.Max(1, Layout.ModalContentRows(s.Height));
+
+    private static AppState ModalScrollTo(AppState s, int index)
+    {
+        var m = s.Modal!;
+        var max = Math.Max(0, m.Lines.Count - ModalPage(s));
+        var scroll = Math.Clamp(index, 0, max);
+        return scroll == m.Scroll ? s : s with { Modal = m with { Scroll = scroll } };
+    }
+
+    /// <summary>Build the modal for a given reference index: read the file (plain first paint) and
+    /// scroll to the referenced line. Highlighting is applied later off-thread (plan §11.5).</summary>
+    private static ModalState BuildModal(AppState s, IReadOnlyList<FileRef> refs, int index)
+    {
+        var r = refs[index];
+        var lines = r.Exists
+            ? ReadFileLines(r.Path)
+            : new[] { $"(unresolved reference — file not found)", "", r.Path };
+        var page = Layout.ModalContentRows(s.Height);
+        var target = r.Line is { } ln ? Math.Max(0, ln - 1 - page / 3) : 0;
+        var scroll = Math.Clamp(target, 0, Math.Max(0, lines.Count - page));
+        return new ModalState
+        {
+            Refs = refs,
+            Index = index,
+            Scroll = scroll,
+            Wrap = s.Modal?.Wrap ?? false,   // preserve wrap across n/p
+            FilePath = r.Path,
+            TargetLine = r.Line,
+            Lines = lines,
+            Highlighted = null,              // orchestrator fills this in for existing files
+        };
+    }
+
+    private static int FirstResolvedIndex(IReadOnlyList<FileRef> refs)
+    {
+        for (var i = 0; i < refs.Count; i++)
+            if (refs[i].Exists) return i;
+        return 0;
+    }
+
+    private static int Step(IReadOnlyList<FileRef> refs, int index, int dir)
+    {
+        if (refs.Count == 0) return 0;
+        return ((index + dir) % refs.Count + refs.Count) % refs.Count;
+    }
+
+    private static IReadOnlyList<string> ReadFileLines(string path)
+    {
+        try { return File.ReadAllLines(path); }
+        catch (IOException) { return ["(could not read file)"]; }
+        catch (UnauthorizedAccessException) { return ["(could not read file)"]; }
+    }
+
+    // --- Highlight & toast events (M5/M6) --------------------------------------
+
+    private static AppState HighlightReady(AppState s, AppEvent.HighlightReady h) =>
+        s.Modal is { Highlighted: null } m && m.FilePath == h.FilePath
+            ? s with { Modal = m with { Highlighted = h.Lines } }
+            : s;
+
+    private static AppState ToastExpired(AppState s, AppEvent.ToastExpired t) =>
+        s.Toast is not null && s.ToastId == t.Id ? Relayout(s with { Toast = null }) : s;
+
+    /// <summary>Set a transient toast (auto-cleared ~3s later by the orchestrator via <see cref="AppEvent.ToastExpired"/>).</summary>
+    private static AppState Toast(AppState s, string text) =>
+        Relayout(s with { Toast = text, ToastId = s.ToastId + 1 });
+
+    // --- Selection normalisation ------------------------------------------------
+
+    /// <summary>After a row set changes, keep the selection valid: survive by id, else move to the
+    /// nearest surviving row (plan §11.4), and re-clamp scroll.</summary>
+    private static AppState NormalizeView(AppState s, int prevIndex)
+    {
+        if (s.Rows.Count == 0)
+            return s with { Selection = null, ScrollOffset = 0 };
+
+        var idx = s.Selection is { } sel ? IndexOf(s.Rows, sel) : -1;
+        if (idx < 0)
+        {
+            idx = Math.Clamp(prevIndex, 0, s.Rows.Count - 1);
+            s = s with { Selection = s.Rows[idx].Node.Id };
+        }
+        var scroll = ClampScroll(s.ScrollOffset, idx, s.Viewport, s.Rows.Count);
+        return s with { ScrollOffset = scroll };
+    }
 
     // --- Tree construction & rollups -------------------------------------------
 

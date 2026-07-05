@@ -187,11 +187,13 @@ public class ReducerTests
     }
 
     [Fact]
-    public void Help_key_sets_footer_message()
+    public void Help_key_opens_overlay_and_any_key_closes()
     {
         var s = Feed(Fresh(), new AppEvent.KeyPressed(Char('?')));
-        Assert.NotNull(s.FooterMessage);
-        Assert.Contains("Phase 2", s.FooterMessage);
+        Assert.True(s.HelpVisible);
+
+        s = Feed(s, new AppEvent.KeyPressed(Char('j')));   // any key closes
+        Assert.False(s.HelpVisible);
     }
 
     [Fact]

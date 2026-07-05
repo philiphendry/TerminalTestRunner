@@ -29,16 +29,50 @@ public sealed record AppState
     /// <summary>First visible row index into the flattened list.</summary>
     public int ScrollOffset { get; init; }
 
-    /// <summary>Number of tree rows the viewport can show (updated on resize; used for nav math).</summary>
+    /// <summary>Number of tree rows the viewport can show (derived via <see cref="Layout"/> on resize/toggle).</summary>
     public int Viewport { get; init; } = 20;
+
+    /// <summary>Last-known terminal size (from <see cref="AppEvent.Resized"/>); drives layout math.</summary>
+    public int Width { get; init; } = 80;
+    public int Height { get; init; } = 24;
 
     public string ScenarioName { get; init; } = "";
 
     /// <summary>True while a run is in progress (drives spinner animation / header state).</summary>
     public bool Running { get; init; }
 
-    /// <summary>Transient one-line footer message (e.g. the Phase-1 '?' help note).</summary>
-    public string? FooterMessage { get; init; }
+    /// <summary>Wall-clock elapsed of the current/last run (shown separately from summed durations, plan §11.2).</summary>
+    public TimeSpan RunWallClock { get; init; }
+
+    // --- Detail pane (M2) -------------------------------------------------------
+    public bool DetailVisible { get; init; }
+    public DetailOrientation DetailOrientation { get; init; } = DetailOrientation.Right;
+    public bool WordWrap { get; init; }
+    public PaneFocus Focus { get; init; } = PaneFocus.Tree;
+    /// <summary>Independent scroll offset (display lines) of the detail pane.</summary>
+    public int DetailScroll { get; init; }
+
+    // --- Filter & durations (M3) ------------------------------------------------
+    public bool FailedOnly { get; init; }
+    public bool ShowDurations { get; init; }
+
+    // --- Rerun / effects (M4) ---------------------------------------------------
+    /// <summary>Bumped when the orchestrator should launch a run; it dispatches each new generation once.</summary>
+    public long RunGeneration { get; init; }
+    /// <summary>Subset for the pending run launch (empty = all).</summary>
+    public IReadOnlyList<TestCaseId> RunSubset { get; init; } = [];
+    /// <summary>Rerun requests accumulated while a run is active; coalesced into one follow-up (plan §9).</summary>
+    public ImmutableHashSet<TestCaseId> QueuedRerun { get; init; } = ImmutableHashSet<TestCaseId>.Empty;
+    /// <summary>Set when a queued rerun is "run everything" (R during an active run).</summary>
+    public bool QueuedRerunAll { get; init; }
+
+    // --- Overlays & toast (M5/M6) ----------------------------------------------
+    public ModalState? Modal { get; init; }
+    public bool HelpVisible { get; init; }
+    /// <summary>Transient one-line toast; auto-cleared ~3s after it appears (M6).</summary>
+    public string? Toast { get; init; }
+    /// <summary>Monotonic id so a stale <see cref="AppEvent.ToastExpired"/> can't clear a newer toast.</summary>
+    public long ToastId { get; init; }
 
     // --- Lifecycle ---
     public bool ShouldQuit { get; init; }

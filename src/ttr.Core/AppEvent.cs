@@ -21,8 +21,9 @@ public abstract record AppEvent
     /// <summary>The run finished. The reducer sweeps any still-Running leaves to NotRun (no phantom spinners).</summary>
     public sealed record RunCompleted : AppEvent;
 
-    /// <summary>Off-thread syntax highlighting for the open 'o' modal is ready (plan §11.5).</summary>
-    public sealed record HighlightReady(string FilePath, IReadOnlyList<string> AnsiLines) : AppEvent;
+    /// <summary>Off-thread syntax highlighting for the open 'o' modal is ready (plan §11.5): one span
+    /// list per source line.</summary>
+    public sealed record HighlightReady(string FilePath, IReadOnlyList<IReadOnlyList<HlSpan>> Lines) : AppEvent;
 
     /// <summary>A transient toast's lifetime elapsed; the reducer clears it iff the id still matches.</summary>
     public sealed record ToastExpired(long Id) : AppEvent;

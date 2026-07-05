@@ -26,6 +26,12 @@ public sealed class RenderLoop
         var lastTickMs = 0.0;
         var tick = 0;
 
+        // Run wall-clock (plan §11.2): starts when a run begins, freezes when it ends. Tracked here
+        // because the reducer is clock-free.
+        var wasRunning = false;
+        var runStartMs = 0.0;
+        var wallClockMs = 0.0;
+
         while (!ct.IsCancellationRequested)
         {
             var state = loop.Current;
@@ -34,6 +40,10 @@ public sealed class RenderLoop
             var width = shell.Width;
             var height = shell.Height;
             var now = metrics.NowMs;
+
+            if (state.Running && !wasRunning) runStartMs = now;
+            if (state.Running) wallClockMs = now - runStartMs;
+            wasRunning = state.Running;
 
             var sizeChanged = width != lastWidth || height != lastHeight;
             if (sizeChanged)
@@ -58,7 +68,7 @@ public sealed class RenderLoop
             }
 
             if (tickDue) { tick++; lastTickMs = now; }
-            var info = new RenderInfo(metrics.Fps, metrics.LatencyP95Ms, tick);
+            var info = new RenderInfo(metrics.Fps, metrics.LatencyP95Ms, tick, wallClockMs);
             shell.Write(FrameBuilder.Build(state, info, width, height));
             metrics.FrameRendered();
             lastRevision = state.Revision;

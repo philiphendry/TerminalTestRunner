@@ -16,6 +16,7 @@ public static class Ansi
     public const string Reset = Esc + "[0m";
     public const string Bold = Esc + "[1m";
     public const string Dim = Esc + "[2m";
+    public const string Underline = Esc + "[4m";
     public const string Reverse = Esc + "[7m";
     public const string ReverseOff = Esc + "[27m";
 

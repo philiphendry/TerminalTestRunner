@@ -13,22 +13,30 @@ public readonly record struct FlatRow(TestNode Node, int Depth);
 public static class TreeFlattener
 {
     public static List<FlatRow> Flatten(AppState state)
-        => Flatten(state.Root, state.Expanded);
+        => Flatten(state.Root, state.Expanded, state.FailedOnly);
 
-    public static List<FlatRow> Flatten(TestNode root, ImmutableHashSet<TestCaseId> expanded)
+    public static List<FlatRow> Flatten(TestNode root, ImmutableHashSet<TestCaseId> expanded, bool failedOnly = false)
     {
         var rows = new List<FlatRow>();
-        Walk(root, 0, expanded, rows);
+        Walk(root, 0, expanded, failedOnly, rows);
         return rows;
     }
 
-    private static void Walk(TestNode node, int depth, ImmutableHashSet<TestCaseId> expanded, List<FlatRow> rows)
+    private static void Walk(
+        TestNode node, int depth, ImmutableHashSet<TestCaseId> expanded, bool failedOnly, List<FlatRow> rows)
     {
+        // Failed-only (plan §11.4): a subtree with no failing leaf is skipped entirely, so only failed
+        // leaves and their ancestor chain remain. Expansion is still honoured within that.
+        if (failedOnly && !HasFailure(node)) return;
+
         rows.Add(new FlatRow(node, depth));
         if (node.Children.Count > 0 && expanded.Contains(node.Id))
         {
             foreach (var child in node.Children)
-                Walk(child, depth + 1, expanded, rows);
+                Walk(child, depth + 1, expanded, failedOnly, rows);
         }
     }
+
+    private static bool HasFailure(TestNode node) =>
+        node.IsLeaf ? node.Status == TestStatus.Failed : node.Failed > 0;
 }

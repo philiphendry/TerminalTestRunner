@@ -12,6 +12,8 @@
   <ItemGroup>
     <!-- Spectre.Console is used ONLY as a measuring library (Segment.CellCount). -->
     <PackageReference Include="Spectre.Console" />
+    <!-- ColorCode.Core: tokenisation for the 'o' modal's syntax highlighting (§11.5). -->
+    <PackageReference Include="ColorCode.Core" />
   </ItemGroup>
 
 </Project>

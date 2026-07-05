@@ -11,8 +11,18 @@ namespace Ttr.Core;
 public sealed class ReducerLoop
 {
     private volatile AppState _current;
+    private readonly Action<AppState, AppState>? _onReduced;
 
-    public ReducerLoop(AppState initial) => _current = initial;
+    /// <summary>
+    /// <paramref name="onReduced"/> (the orchestrator) is invoked after each state change, on the
+    /// reducer thread, to LAUNCH side effects in reaction to state (plan invariant 1). It must not
+    /// block or mutate state — only fire off cancellable tasks that feed events back onto the channel.
+    /// </summary>
+    public ReducerLoop(AppState initial, Action<AppState, AppState>? onReduced = null)
+    {
+        _current = initial;
+        _onReduced = onReduced;
+    }
 
     /// <summary>The latest published snapshot. Read from any thread.</summary>
     public AppState Current => _current;
@@ -23,8 +33,11 @@ public sealed class ReducerLoop
         {
             await foreach (var e in reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                _current = Reducer.Reduce(_current, e);
-                if (_current.ShouldQuit) break;
+                var prev = _current;
+                var next = Reducer.Reduce(prev, e);
+                _current = next;
+                if (!ReferenceEquals(prev, next)) _onReduced?.Invoke(prev, next);
+                if (next.ShouldQuit) break;
             }
         }
         catch (OperationCanceledException)
