@@ -9,11 +9,18 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: 1
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_CLI_UI_LANGUAGE: en
 
 jobs:
-  build-test:
-    name: build + test (Linux)
-    runs-on: ubuntu-latest
+  # Build + unit/snapshot/integration suite across all three OSes (brief M5). The integration matrix
+  # discovers AND runs the fixture frameworks that restore on each OS (VSTest + MTP are cross-platform).
+  test:
+    name: build + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
     steps:
       - uses: actions/checkout@v4
 
@@ -29,12 +36,57 @@ jobs:
         run: dotnet build ttr.sln --configuration Release --no-restore
 
       # Build the fixture matrix (standalone sample projects, isolated from the repo's CPM) so the
-      # M8 integration tests discover them for real rather than skipping (Win/macOS lanes: Phase 4).
+      # integration tests discover + run them for real. MultiTfm builds net10.0 only (its net8.0 TFM is
+      # evaluate-only where the net8 runtime is absent — ttr surfaces that as a warning node).
       - name: Build fixture matrix
+        shell: bash
         run: |
-          for p in fixtures/matrix/XunitV2.Tests fixtures/matrix/XunitV3.Tests fixtures/matrix/NUnit4Broken.Tests; do
-            dotnet build "$p" --configuration Debug
+          for p in XunitV2.Tests XunitV3.Tests NUnitClassic.Tests NUnit4Broken.Tests MSTestSdk.Tests TUnit.Tests; do
+            dotnet build "fixtures/matrix/$p" --configuration Debug
           done
+          dotnet build fixtures/matrix/MultiTfm.Tests --configuration Debug --framework net10.0
 
       - name: Test
         run: dotnet test ttr.sln --configuration Release --no-build --verbosity normal
+
+  # Machine-check the invariant-5 "no line exceeds its pane" guarantee in a real terminal (Linux/tmux).
+  over-width:
+    name: tmux over-width guarantee (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Build ttr
+        run: dotnet build src/ttr.Cli --configuration Debug
+      - name: Assert no line exceeds its pane at multiple sizes
+        run: bash scripts/tui-overwidth.sh "$(pwd)/src/ttr.Cli/bin/Debug/net10.0/ttr.dll"
+
+  # Dogfooding + exit-code correctness (brief M5/M6, AC5): drive real runs through tmux and assert the
+  # process exit code (0 all-pass / 1 on failures / 130 on Ctrl+C). Regressions here break ttr's own CI.
+  dogfood:
+    name: dogfood exit codes (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Build ttr
+        run: dotnet build src/ttr.Cli --configuration Debug
+      - name: Build fixture matrix
+        shell: bash
+        run: |
+          for p in XunitV2.Tests XunitV3.Tests NUnitClassic.Tests NUnit4Broken.Tests MSTestSdk.Tests TUnit.Tests; do
+            dotnet build "fixtures/matrix/$p" --configuration Debug
+          done
+          dotnet build fixtures/matrix/MultiTfm.Tests --configuration Debug --framework net10.0
+      - name: Assert exit-code correctness on real runs
+        run: bash scripts/dogfood-exit-codes.sh "$(pwd)/src/ttr.Cli/bin/Debug/net10.0/ttr.dll" "$(pwd)/fixtures/matrix"

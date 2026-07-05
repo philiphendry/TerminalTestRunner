@@ -40,6 +40,9 @@ rendering/terminal type.
 4. **Direct ANSI rendering — NOT Spectre `Live`** (POC-4 finding). Alternate screen
    `\x1b[?1049h`, cursor-home + line-by-line frame writes. Spectre.Console is used ONLY as
    a measuring library: `Segment.CellCount()` for cell widths (CJK/emoji are 2 cells).
+   On Windows, enable VT processing at startup (`SetConsoleMode` +
+   `ENABLE_VIRTUAL_TERMINAL_PROCESSING`) before any ANSI writes; fail with a clear
+   message if it can't be enabled (legacy conhost).
 5. **No line ever exceeds its pane width.** Every rendered string is cell-aware truncated
    with `…` before writing. Poll `Console.WindowWidth/Height` every frame; below ~40×10
    render a "terminal too small" placeholder.
@@ -73,6 +76,7 @@ rendering/terminal type.
   which arrives BEFORE the JSON-RPC response. Sentinel is primary.
 - `exit` may hang: 5 s timeout then `Process.Kill(entireProcessTree: true)`.
 - Tolerate and log unknown notifications (`telemetry/update`, `client/log`).
+- Params are a SINGLE JSON object with flat dotted keys (Phase 3 live-protocol correction).
 - Results batch on a 200 ms platform timer — fast suites arrive as one burst; spinners are
   driven by `in-progress` notifications. The coalescing render loop absorbs this.
 - Read `serverInfo.version` at handshake; warn on major-version jump (tested 1.9.1–2.2.3).

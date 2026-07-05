@@ -30,13 +30,16 @@ public static class App
             });
     }
 
-    /// <summary>Real read-only session: evaluate/build/discover the resolved targets (Phase 3). Runs are
-    /// disabled (they arrive in Phase 4). The backend streams the same <see cref="AppEvent"/> shapes the
-    /// Fake adapter does, so the whole UI is backend-agnostic.</summary>
+    /// <summary>Real session: evaluate/build/discover the resolved targets, then run them on demand (Phase 4).
+    /// The backend is BOTH the initial discovery producer and the run adapter the orchestrator drives on
+    /// <c>r</c>/<c>R</c>; it streams the same <see cref="AppEvent"/> shapes the Fake adapter does, so the whole
+    /// UI is backend-agnostic.</summary>
     public static int RunReal(RealBackend backend, string title)
     {
-        var initial = AppState.Initial(title, runsEnabled: false, rootName: title);
-        return RunLoop(initial, adapter: null, backend.RunAsync);
+        var initial = AppState.Initial(title, runsEnabled: true, rootName: title);
+        var target = new TestTarget(title);
+        return RunLoop(initial, adapter: backend,
+            (writer, ct) => backend.DiscoverAsync(target, writer, ct));
     }
 
     private static int RunLoop(
@@ -63,6 +66,16 @@ public static class App
         // to reducer-produced state; the reducer loop invokes it after each change (plan invariant 1).
         var orchestrator = new Orchestrator(adapter, channel.Writer, cts.Token);
         var loop = new ReducerLoop(initial, orchestrator.OnReduced);
+
+        // CLAUDE.md invariant 4: enable Windows VT processing BEFORE any ANSI byte is written; on a legacy
+        // conhost where it can't be enabled, fail with a clear message instead of spraying escape codes.
+        if (!WindowsTerminal.TryEnableVirtualTerminalProcessing(out var vtError))
+        {
+            Console.Error.WriteLine(vtError);
+            if (adapter is not null) await adapter.DisposeAsync();
+            return 3;
+        }
+
         using var shell = new AnsiConsoleShell();
         shell.Enter();
         try

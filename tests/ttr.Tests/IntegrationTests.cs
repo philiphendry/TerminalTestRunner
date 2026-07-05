@@ -65,16 +65,22 @@ public class IntegrationTests
             await d.DiscoverAsync([new VsTestSource(proj, "net10.0", dll!)], writer, null, default);
         });
 
-        // 5 methods (Add_ReturnsSum, Divide_Works, Failing_Assertion, Skipped_Test, Add_Theory[3 rows]) = 7 leaves.
-        Assert.Equal(7, state.TotalTests);
+        // Add_ReturnsSum, Divide_Works, Failing_Assertion, Skipped_Test, Add_Theory[3 rows],
+        // Add_MemberData[1 non-serialisable placeholder] = 8 leaves at discovery.
+        Assert.Equal(8, state.TotalTests);
         var project = Assert.Single(state.Root.Children);
         Assert.Equal("XunitV2.Tests", project.Name);
         // Single-TFM → the TFM level is collapsed (namespace hangs off the project).
         Assert.Equal(TestNodeKind.Namespace, project.Children[0].Kind);
-        // The theory materialised its 3 InlineData rows as Case children.
+        // The InlineData theory materialised its 3 rows as Case children at discovery (serialisable).
         var theory = FindNode(state.Root, n => n.Name == "Add_Theory");
         Assert.NotNull(theory);
         Assert.Equal(3, theory!.Children.Count);
+        // The non-serialisable MemberData theory discovers as a SINGLE leaf (display == FQN); its rows
+        // enumerate only at run (the live 1→N shape, proven in RunIntegrationTests / AC4).
+        var memberData = FindNode(state.Root, n => n.Name == "Add_MemberData");
+        Assert.NotNull(memberData);
+        Assert.True(memberData!.IsLeaf);
     }
 
     [Fact]
@@ -91,15 +97,79 @@ public class IntegrationTests
             await MtpDiscoverer.DiscoverAsync(proj, dll!, "net10.0", null, writer, null, cts.Token);
         });
 
-        Assert.True(state.TotalTests >= 3, $"expected ≥3 MTP tests, got {state.TotalTests}");
+        // Get_Succeeds, Post_Succeeds, Failing + the Even theory's two enumerated rows = 5 leaves.
+        Assert.Equal(5, state.TotalTests);
         var getSucceeds = FindNode(state.Root, n => n.Name == "Get_Succeeds");
         Assert.NotNull(getSucceeds);
         // The structured MTP location is wired as the default 'o' target.
         Assert.Contains(getSucceeds!.FileRefs, r => r.FileName == "ApiTests.cs");
+        // The theory's rows render as distinct Case leaves under one Method (never collapsed onto the
+        // shared location.method signature — the Phase 4 mapping correction).
+        var even = FindNode(state.Root, n => n.Name == "Even");
+        Assert.NotNull(even);
+        Assert.Equal(2, even!.Children.Count);
 
         // No orphaned test hosts survive discovery (AC9).
         await Task.Delay(1000);
         Assert.True(ProcessSnapshot() <= before + 0, "an MTP test host was left running after discovery");
+    }
+
+    [Fact]
+    public async Task NUnitClassic_vstest_discovers_expected_tree()
+    {
+        var dll = FixtureAssembly("NUnitClassic.Tests");
+        var console = SdkTools.FindVsTestConsole();
+        if (dll is null || console is null) return;   // skip
+
+        var proj = FixtureProject("NUnitClassic.Tests");
+        var state = await DiscoverThroughReducer(async writer =>
+        {
+            writer.TryWrite(new AppEvent.ProjectRegistered(proj, "NUnitClassic.Tests", ["net10.0"], RunnerKind.VsTest));
+            await using var d = new VsTestDiscoverer(console!);
+            await d.DiscoverAsync([new VsTestSource(proj, "net10.0", dll!)], writer, null, default);
+        });
+        // Adds, Fails, Doubles(2,4), Doubles(3,6) = 4 leaves (NUnit enumerates TestCase rows at discovery).
+        Assert.Equal(4, state.TotalTests);
+        Assert.NotNull(FindNode(state.Root, n => n.Name == "Adds"));
+    }
+
+    [Theory]
+    [InlineData("MSTestSdk.Tests", 4, "Creates")]   // MSTest.Sdk (MTP)
+    [InlineData("TUnit.Tests", 3, "Adds_Item")]     // TUnit (MTP)
+    public async Task Mtp_framework_discovers_expected_tree(string project, int expected, string sampleTest)
+    {
+        var dll = FixtureAssembly(project);
+        if (dll is null) return;   // skip: fixture not built
+
+        var proj = FixtureProject(project);
+        var state = await DiscoverThroughReducer(async writer =>
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            await MtpDiscoverer.DiscoverAsync(proj, dll!, "net10.0", null, writer, null, cts.Token);
+        });
+        Assert.Equal(expected, state.TotalTests);
+        Assert.NotNull(FindNode(state.Root, n => n.Name == sampleTest));
+    }
+
+    [Fact]
+    public async Task MultiTfm_inserts_a_tfm_level_and_discovers_net10()
+    {
+        var dll = FixtureAssembly("MultiTfm.Tests");   // net10.0 dll (net8.0 may be evaluate-only)
+        if (dll is null) return;   // skip
+
+        var proj = FixtureProject("MultiTfm.Tests");
+        var state = await DiscoverThroughReducer(async writer =>
+        {
+            // A multi-TFM project registers >1 TFM → the tree inserts TFM child nodes (§8/D9).
+            writer.TryWrite(new AppEvent.ProjectRegistered(proj, "MultiTfm.Tests", ["net10.0", "net8.0"], RunnerKind.Mtp));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            await MtpDiscoverer.DiscoverAsync(proj, dll!, "net10.0", "net10.0", writer, null, cts.Token);
+        });
+        Assert.Equal(2, state.TotalTests);   // Works_Everywhere, Also_Works (net10.0)
+        var project = Assert.Single(state.Root.Children);
+        // The TFM level is present (multi-targeting) and net10.0 carries the tests.
+        Assert.Contains(project.Children, c => c.Kind == TestNodeKind.Tfm && c.Name == "net10.0");
+        Assert.Contains(project.Children, c => c.Kind == TestNodeKind.Tfm && c.Name == "net8.0");
     }
 
     [Fact]

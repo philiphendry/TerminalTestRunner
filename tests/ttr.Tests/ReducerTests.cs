@@ -204,4 +204,80 @@ public class ReducerTests
         Assert.Equal(s0.Revision, s1.Revision);
         Assert.Same(s0, s1);
     }
+
+    // --- Phase 4: 1→N theory promotion (AC4) and exit codes (M4) ----------------
+
+    [Fact]
+    public void Nonserialisable_theory_promotes_method_leaf_to_branch_on_run()
+    {
+        // A non-serialisable theory discovers as ONE plain case (display == FQN → the Method IS the leaf).
+        var method = Id("N", "C", "Theory");
+        var s = Discover(Fresh(), method);
+        Assert.Equal(1, s.Root.TotalLeaves);
+        Assert.True(NodeNamed(s, "Theory")!.IsLeaf);
+
+        // The run reveals N rows with distinct displays under the same method (the live 1→N shape).
+        var row1 = Id("N", "C", "Theory", "(x: 1)");
+        var row2 = Id("N", "C", "Theory", "(x: 2)");
+        s = Feed(s,
+            new AppEvent.TestStarted(row1),
+            new AppEvent.TestFinished(row1, TestOutcome.Passed, TimeSpan.FromMilliseconds(3)),
+            new AppEvent.TestStarted(row2),
+            new AppEvent.TestFinished(row2, TestOutcome.Failed, TimeSpan.FromMilliseconds(4)),
+            new AppEvent.RunCompleted());
+
+        var promoted = NodeNamed(s, "Theory")!;
+        Assert.False(promoted.IsLeaf);
+        Assert.Equal(2, promoted.Children.Count);
+        // The Method leaf no longer counts as its own test — the rows count exactly once.
+        Assert.Equal(2, s.Root.TotalLeaves);
+        Assert.Equal(1, s.Root.Passed);
+        Assert.Equal(1, s.Root.Failed);
+        Assert.Equal(0, s.Root.NotRun);
+        Assert.Equal(TimeSpan.FromMilliseconds(7), s.Root.RollupDuration);
+    }
+
+    [Fact]
+    public void Stray_run_event_on_a_promoted_method_never_corrupts_rollups()
+    {
+        var method = Id("N", "C", "Theory");
+        var s = Discover(Fresh(), method);
+        s = Feed(s,
+            new AppEvent.TestStarted(Id("N", "C", "Theory", "(x: 1)")),
+            new AppEvent.TestFinished(Id("N", "C", "Theory", "(x: 1)"), TestOutcome.Passed, TimeSpan.Zero));
+
+        // A late ActiveTests-style event addressing the BASE method (no row) must be a no-op on the branch.
+        s = Feed(s, new AppEvent.TestStarted(method));
+        Assert.Equal(1, s.Root.TotalLeaves);
+        Assert.Equal(0, s.Root.Running);
+        Assert.Equal(1, s.Root.Passed);
+    }
+
+    [Fact]
+    public void Quit_exit_code_reflects_failures_and_ctrlc_wins()
+    {
+        var t = Id("N", "C", "T");
+        var passed = Feed(Discover(Fresh(), t),
+            new AppEvent.TestFinished(t, TestOutcome.Passed, TimeSpan.Zero));
+        var q0 = Feed(passed, new AppEvent.KeyPressed(Char('q')));
+        Assert.True(q0.ShouldQuit);
+        Assert.Equal(0, q0.ExitCode);
+
+        var failed = Feed(passed, new AppEvent.TestFinished(t, TestOutcome.Failed, TimeSpan.Zero));
+        Assert.Equal(1, Feed(failed, new AppEvent.KeyPressed(Char('q'))).ExitCode);
+        // Ctrl+C is 130 even when tests failed.
+        Assert.Equal(130, Feed(failed, new AppEvent.KeyPressed(Key('', ConsoleKey.C, control: true))).ExitCode);
+    }
+
+    private static TestNode? NodeNamed(AppState s, string name)
+    {
+        static TestNode? Walk(TestNode n, string name)
+        {
+            if (n.Name == name) return n;
+            foreach (var c in n.Children)
+                if (Walk(c, name) is { } found) return found;
+            return null;
+        }
+        return Walk(s.Root, name);
+    }
 }

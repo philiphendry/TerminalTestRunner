@@ -1,6 +1,10 @@
 <Solution>
   <Project Path="XunitV2.Tests/XunitV2.Tests.csproj" />
   <Project Path="XunitV3.Tests/XunitV3.Tests.csproj" />
+  <Project Path="NUnitClassic.Tests/NUnitClassic.Tests.csproj" />
   <Project Path="NUnit4Broken.Tests/NUnit4Broken.Tests.csproj" />
+  <Project Path="MSTestSdk.Tests/MSTestSdk.Tests.csproj" />
+  <Project Path="TUnit.Tests/TUnit.Tests.csproj" />
+  <Project Path="MultiTfm.Tests/MultiTfm.Tests.csproj" />
   <Project Path="Ghost.Tests/Ghost.Tests.csproj" />
 </Solution>

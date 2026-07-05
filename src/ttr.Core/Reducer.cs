@@ -113,10 +113,11 @@ public static class Reducer
 
     private static AppState RunCompleted(AppState s)
     {
-        // Sweep any still-Running leaf to NotRun so an aborted/interrupted run leaves no phantom
-        // spinners (CLAUDE.md VSTest rule — enforced uniformly here for every adapter).
+        // Sweep any still-Running OR still-Queued leaf to NotRun so an aborted/interrupted run — or a
+        // queued leaf whose adapter never ran it — leaves no phantom spinner (a branch renders a spinner
+        // while Queued>0). CLAUDE.md's VSTest abort rule, enforced uniformly here for every adapter.
         foreach (var leaf in Leaves(s.Root))
-            if (leaf.Status == TestStatus.Running)
+            if (leaf.Status is TestStatus.Running or TestStatus.Queued)
                 ApplyStatus(leaf, TestStatus.NotRun);
 
         var next = s with { Running = false };
@@ -308,7 +309,9 @@ public static class Reducer
 
         switch (k.KeyChar)
         {
-            case 'q': return s with { ShouldQuit = true, ExitCode = 0 };
+            // Quit: exit 1 if any test in the session's latest results failed, else 0 (plan §3, brief M4).
+            // Ctrl+C's 130 is handled earlier and always wins.
+            case 'q': return s with { ShouldQuit = true, ExitCode = s.Failed > 0 ? 1 : 0 };
             case 'k': return detailFocused ? DetailScroll(s, -1) : Move(s, -1);
             case 'j': return detailFocused ? DetailScroll(s, +1) : Move(s, +1);
             case 'e': return ToggleExpand(s, recursive: false);
@@ -650,13 +653,32 @@ public static class Reducer
         }
 
         // Theory: Method is a branch; each row is a Case leaf (the 1→N shape, incl. mid-run inserts).
-        var method = EnsureBranch(cls, id.Method, TestNodeKind.Method,
-            TestCaseId.ForBranch(TestNodeKind.Method, id.Project, id.Tfm, id.Namespace, id.ClassName, id.Method),
-            id.Method, expanded, ref structural);
+        var method = EnsureMethodBranch(cls, id, expanded, ref structural);
         // Key the Case leaf on the derived id (CLAUDE.md invariant 7), not the display: some frameworks
         // (xUnit v3 at MTP discovery) give data rows an identical display-name, and keying on that would
         // collapse distinct rows into one node. The display stays the human label.
         return EnsureLeafNode(method, id.Id.Value, TestNodeKind.Case, id.Id, id.CaseDisplay!, ref structural);
+    }
+
+    /// <summary>Resolve the Method branch for a theory row, promoting a Method that was materialised as a
+    /// plain-test LEAF (a non-serialisable theory that discovered as one case, display == FQN) into a branch:
+    /// its own leaf contribution is removed from the rollups so the Case children count once — the live 1→N
+    /// shape (brief M2/AC4). A Method created fresh here (or already a branch) needs no demotion.</summary>
+    private static TestNode EnsureMethodBranch(
+        TestNode cls, TestIdentity id, ImmutableHashSet<TestCaseId>.Builder expanded, ref bool structural)
+    {
+        var existing = cls.FindChild(id.Method);
+        if (existing is null)
+            return EnsureBranch(cls, id.Method, TestNodeKind.Method,
+                TestCaseId.ForBranch(TestNodeKind.Method, id.Project, id.Tfm, id.Namespace, id.ClassName, id.Method),
+                id.Method, expanded, ref structural);
+
+        if (existing.IsLeaf && existing.TotalLeaves > 0)
+        {
+            RemoveLeafFromRollups(existing);
+            structural = true;   // a leaf became a branch — the flattened row set changes
+        }
+        return existing;
     }
 
     private static TestNode EnsureBranch(
@@ -696,9 +718,30 @@ public static class Reducer
         }
     }
 
-    /// <summary>Transition a leaf, propagating the count delta up the ancestor chain.</summary>
+    /// <summary>Remove a former leaf's own contribution from every ancestor's rollups (and its own), so a
+    /// Method that turns out to be a theory branch stops being counted as a test itself (the 1→N promotion).</summary>
+    private static void RemoveLeafFromRollups(TestNode formerLeaf)
+    {
+        var status = formerLeaf.Status;
+        var dur = formerLeaf.Duration;
+        for (TestNode? n = formerLeaf; n is not null; n = n.Parent)
+        {
+            n.Counts[(int)status]--;
+            n.TotalLeaves--;
+            n.RollupDuration -= dur;
+        }
+        formerLeaf.Status = TestStatus.NotRun;
+        formerLeaf.Duration = TimeSpan.Zero;
+        formerLeaf.Detail = null;
+        formerLeaf.FileRefs = [];
+    }
+
+    /// <summary>Transition a leaf, propagating the count delta up the ancestor chain. A no-op on a branch —
+    /// branch display state is derived from rollups, so a stray run event addressing a promoted Method (e.g.
+    /// VSTest ActiveTests reporting the base FQN after its rows materialised) never corrupts the counters.</summary>
     private static void ApplyStatus(TestNode leaf, TestStatus next)
     {
+        if (leaf.Children.Count > 0) return;
         var prev = leaf.Status;
         if (prev == next) return;
         for (TestNode? n = leaf; n is not null; n = n.Parent)
@@ -718,6 +761,7 @@ public static class Reducer
     /// </summary>
     private static void AttachDetail(TestNode leaf, TestResultDetail? detail)
     {
+        if (leaf.Children.Count > 0) return;   // a promoted Method branch carries no own detail
         leaf.Detail = detail;
         leaf.FileRefs = detail is null || detail.IsEmpty
             ? []
@@ -734,6 +778,7 @@ public static class Reducer
 
     private static void SetDuration(TestNode leaf, TimeSpan duration)
     {
+        if (leaf.Children.Count > 0) return;   // a promoted Method branch sums its rows' durations instead
         var delta = duration - leaf.Duration;
         for (TestNode? n = leaf; n is not null; n = n.Parent)
             n.RollupDuration += delta;

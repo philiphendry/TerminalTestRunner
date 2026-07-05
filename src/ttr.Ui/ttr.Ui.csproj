@@ -3,6 +3,9 @@
   <PropertyGroup>
     <RootNamespace>Ttr.Ui</RootNamespace>
     <AssemblyName>ttr.Ui</AssemblyName>
+    <!-- Required by the [LibraryImport] source generator for the Windows VT-enablement P/Invoke
+         (WindowsTerminal.cs, CLAUDE.md invariant 4). Only permits the generated marshalling code. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
