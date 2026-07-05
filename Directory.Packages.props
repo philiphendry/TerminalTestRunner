@@ -14,6 +14,21 @@
          formatters emit HTML). -->
     <PackageVersion Include="ColorCode.Core" Version="2.0.15" />
 
+    <!-- Phase 3 (pre-approved in the brief). MSBuildLocator loads the SDK's real (18.x) MSBuild at
+         runtime; the Microsoft.Build.* packages are COMPILE-TIME type surface only, so they carry
+         ExcludeAssets="runtime" (CLAUDE.md / plan §7 — silences NU1903 and avoids version-mismatch
+         loads). 17.14.x is the family the plan validated against the .NET 10 SDK. -->
+    <PackageVersion Include="Microsoft.Build.Locator" Version="1.11.2" />
+    <PackageVersion Include="Microsoft.Build" Version="17.14.28" />
+    <PackageVersion Include="Microsoft.Build.Framework" Version="17.14.28" />
+    <!-- Solution (.sln/.slnx) parsing, pinned 1.0.52 (plan §4 / POC-7). -->
+    <PackageVersion Include="Microsoft.VisualStudio.SolutionPersistence" Version="1.0.52" />
+    <!-- VSTest discovery via the translation layer (plan §6.3); talks to the SDK's vstest.console. -->
+    <PackageVersion Include="Microsoft.TestPlatform.TranslationLayer" Version="18.7.0" />
+    <PackageVersion Include="Microsoft.TestPlatform.ObjectModel" Version="18.7.0" />
+    <!-- MTP server-mode JSON-RPC (plan §6.4). -->
+    <PackageVersion Include="StreamJsonRpc" Version="2.22.23" />
+
     <!-- Test dependencies -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

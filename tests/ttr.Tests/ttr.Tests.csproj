@@ -11,6 +11,7 @@
     <ProjectReference Include="../../src/ttr.Core/ttr.Core.csproj" />
     <ProjectReference Include="../../src/ttr.Ui/ttr.Ui.csproj" />
     <ProjectReference Include="../../src/ttr.Runners/ttr.Runners.csproj" />
+    <ProjectReference Include="../../src/ttr.Build/ttr.Build.csproj" />
   </ItemGroup>
 
   <ItemGroup>

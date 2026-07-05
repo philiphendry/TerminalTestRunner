@@ -5,6 +5,23 @@
     <AssemblyName>ttr.Build</AssemblyName>
   </PropertyGroup>
 
-  <!-- Empty placeholder for Phase 1. MSBuild/build subsystem arrives in Phase 3. -->
+  <!-- ttr.Build → ttr.Core (domain types only). Core stays UI-free; this arrow does not violate the
+       invariant (CLAUDE.md: "Core must never reference Ui"). -->
+  <ItemGroup>
+    <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
+  </ItemGroup>
+
+  <!--
+    MSBuildLocator loads the SDK's real MSBuild at runtime; the Microsoft.Build.* packages are
+    compile-time type surface only, so ExcludeAssets="runtime" (CLAUDE.md build rule / plan §7).
+    Microsoft.Build.Locator itself DOES ship at runtime (it is the registration shim).
+    Microsoft.VisualStudio.SolutionPersistence parses .sln/.slnx (plan §4).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Locator" />
+    <PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.SolutionPersistence" />
+  </ItemGroup>
 
 </Project>
