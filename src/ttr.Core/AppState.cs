@@ -77,6 +77,19 @@ public sealed record AppState
     /// <summary>Set when a queued rerun is "run everything" (R during an active run).</summary>
     public bool QueuedRerunAll { get; init; }
 
+    // --- Watch (Phase 5, plan §9) ----------------------------------------------
+    /// <summary>Off, or which source drives watch mode. Off ⇒ no header segment ⇒ non-watch snapshots
+    /// stay byte-identical to earlier phases (brief M1).</summary>
+    public WatchKind Watch { get; init; } = WatchKind.Off;
+
+    /// <summary>The watch pipeline's coarse activity (change-detected / queued / idle); building and
+    /// running are derived from <see cref="Busy"/>/<see cref="Running"/> for the header.</summary>
+    public WatchActivity WatchActivity { get; init; } = WatchActivity.Idle;
+
+    /// <summary>Number of tests in the current run (set when a run launches) — the <c>m</c> in the watch
+    /// header's <c>running (n/m)</c>. Zero outside a run.</summary>
+    public int RunTotal { get; init; }
+
     // --- Overlays & toast (M5/M6) ----------------------------------------------
     public ModalState? Modal { get; init; }
     public bool HelpVisible { get; init; }

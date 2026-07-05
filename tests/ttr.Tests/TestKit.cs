@@ -111,6 +111,29 @@ internal static partial class TestKit
 
     public static TestCaseId ProjectId(string projectPath) => TestCaseId.ForBranch(TestNodeKind.Project, projectPath);
 
+    /// <summary>The <c>--fake --watch</c> base state (brief M1): the registered single-TFM project with its
+    /// initial three tests discovered, watch mode on. The snapshot suite drives the watch states from here.</summary>
+    public static AppState WatchBase()
+    {
+        var s = AppState.Initial("watch", runsEnabled: true, rootName: "watch") with { Watch = WatchKind.Build };
+        s = Reducer.Reduce(s, FakeWatchScript.ProjectRegistered);
+        return Reducer.Reduce(s, new AppEvent.TestsDiscovered(FakeWatchScript.Initial));
+    }
+
+    /// <summary>The watch base after an initial run (Subtract fails, the rest pass) — the state the
+    /// re-discovery diff snapshots start from, so kept results are visible.</summary>
+    public static AppState WatchRan()
+    {
+        var s = WatchBase();
+        foreach (var id in FakeWatchScript.Initial)
+        {
+            s = Reducer.Reduce(s, new AppEvent.TestStarted(id));
+            var (outcome, detail) = FakeWatchScript.Outcome(id);
+            s = Reducer.Reduce(s, new AppEvent.TestFinished(id, outcome, TimeSpan.FromMilliseconds(2), detail));
+        }
+        return Reducer.Reduce(s, new AppEvent.RunCompleted());
+    }
+
     /// <summary>Move the selection onto the first visible row whose node name equals <paramref name="name"/>.</summary>
     public static AppState SelectByName(AppState s, string name)
     {

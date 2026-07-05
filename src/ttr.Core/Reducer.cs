@@ -33,6 +33,10 @@ public static class Reducer
             AppEvent.TestStarted t => Started(s, t),
             AppEvent.TestFinished t => Finished(s, t),
             AppEvent.RunCompleted => RunCompleted(s),
+            AppEvent.WatchStateChanged w => WatchStateChanged(s, w),
+            AppEvent.RediscoveryStarted d => RediscoveryStarted(s, d),
+            AppEvent.RediscoveryCompleted d => RediscoveryCompleted(s, d),
+            AppEvent.WatchRerunRequested w => WatchRerunRequested(s, w),
             AppEvent.Resized r => Resized(s, r),
             AppEvent.KeyPressed k => Key(s, k.Key),
             AppEvent.HighlightReady h => HighlightReady(s, h),
@@ -53,6 +57,7 @@ public static class Reducer
         {
             var leaf = EnsureLeaf(s.Root, id, expanded, ref structural);
             AttachSourceLocation(leaf, id);
+            ClearTombstone(leaf);   // a re-discovered test survives the diff sweep (brief M3)
         }
 
         var selection = s.Selection ?? s.Root.Id;
@@ -132,6 +137,118 @@ public static class Reducer
 
         // Filter view may need a rebuild after the final sweep.
         return s.FailedOnly ? NormalizeView(RebuildRows(next), CurrentIndex(s)) : next;
+    }
+
+    // --- Phase 5: watch subsystem (plan §9) -------------------------------------
+
+    /// <summary>Update the watch pipeline's coarse activity (the header's change-detected / queued / idle
+    /// states; building/running are derived from <see cref="AppState.Busy"/>/<see cref="AppState.Running"/>).
+    /// Ignored when not in watch mode so nothing changes for a normal session.</summary>
+    private static AppState WatchStateChanged(AppState s, AppEvent.WatchStateChanged w) =>
+        s.Watch == WatchKind.Off || s.WatchActivity == w.Activity ? s : s with { WatchActivity = w.Activity };
+
+    /// <summary>Begin a re-discovery diff (brief M3): tombstone every existing test leaf under the changed
+    /// projects. Invisible (no revision bump) — surviving tests clear their tombstone as their
+    /// <see cref="AppEvent.TestsDiscovered"/> re-arrives; <see cref="RediscoveryCompleted"/> sweeps the rest.</summary>
+    private static AppState RediscoveryStarted(AppState s, AppEvent.RediscoveryStarted d)
+    {
+        foreach (var path in d.ProjectPaths)
+        {
+            var project = s.Root.FindChild(path);
+            if (project is null) continue;
+            foreach (var leaf in Leaves(project)) leaf.PendingRemoval = true;
+        }
+        return s;
+    }
+
+    /// <summary>Finish a re-discovery diff (brief M3): remove every still-tombstoned leaf, prune the
+    /// branches that emptied, and keep the selection valid (survive by id, else nearest survivor).
+    /// Kept tests were never touched, so their status/detail is preserved.</summary>
+    private static AppState RediscoveryCompleted(AppState s, AppEvent.RediscoveryCompleted d)
+    {
+        var prevIndex = CurrentIndex(s);
+        var changed = false;
+        foreach (var path in d.ProjectPaths)
+        {
+            var project = s.Root.FindChild(path);
+            if (project is not null) changed |= SweepTombstoned(project);
+        }
+        if (!changed) return s;
+        return NormalizeView(RebuildRows(s with { TreeVersion = s.TreeVersion + 1 }), prevIndex);
+    }
+
+    /// <summary>Auto-rerun the affected test set after a watch cycle (plan §9, AC7): all leaves under the
+    /// affected projects, narrowed to failed-only when 'f' is active. Marks them Queued and launches a run —
+    /// or, if a run is already active, coalesces into the ONE consolidated follow-up (reusing the Phase 4
+    /// queue, AC6). Newly-added tests run in the same cycle (they are NotRun leaves under an affected project).</summary>
+    private static AppState WatchRerunRequested(AppState s, AppEvent.WatchRerunRequested w)
+    {
+        if (!s.RunsEnabled) return s;
+
+        var targets = new List<TestNode>();
+        foreach (var path in w.ProjectPaths)
+        {
+            var project = s.Root.FindChild(path);
+            if (project is null) continue;
+            foreach (var leaf in Leaves(project))
+                if (!s.FailedOnly || leaf.Status is TestStatus.Failed or TestStatus.Queued or TestStatus.Running)
+                    targets.Add(leaf);
+        }
+        if (targets.Count == 0) return s;   // nothing to rerun (e.g. 'f' active and nothing failed)
+
+        var subset = targets.Select(l => l.Id).ToList();
+        if (s.Running)
+            return s with { QueuedRerun = s.QueuedRerun.Union(subset) };   // coalesce behind the active run
+
+        foreach (var leaf in targets) ApplyStatus(leaf, TestStatus.Queued);
+        return LaunchRun(s, subset);
+    }
+
+    /// <summary>Clear the re-discovery tombstone on a re-touched node and its whole subtree, so a
+    /// non-serialisable theory (re-supplied as its Method only) keeps the run-materialised Case children it
+    /// already has, while an xUnit-v3-style theory (rows re-enumerated at discovery) clears each row itself.</summary>
+    private static void ClearTombstone(TestNode node)
+    {
+        node.PendingRemoval = false;
+        foreach (var child in node.Children) ClearTombstone(child);
+    }
+
+    /// <summary>Remove tombstoned leaves under <paramref name="node"/> and prune the Namespace/Class/Method
+    /// branches that empty out as a result (Project/Tfm/Solution/Notice nodes are never pruned). Returns
+    /// whether anything was removed.</summary>
+    private static bool SweepTombstoned(TestNode node)
+    {
+        var changed = false;
+        foreach (var child in node.Children.ToArray())   // snapshot: RemoveChild mutates the list
+        {
+            if (child.IsLeaf)
+            {
+                if (child.PendingRemoval) { RemoveLeaf(child); changed = true; }
+                continue;
+            }
+            changed |= SweepTombstoned(child);
+            if (child.IsLeaf && child.Kind is TestNodeKind.Namespace or TestNodeKind.Class or TestNodeKind.Method)
+            {
+                node.RemoveChild(child.KeyInParent!);   // an emptied structural branch disappears
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    /// <summary>Detach a leaf and subtract its contribution from every ancestor's rollups (the inverse of
+    /// <see cref="AddLeafToRollups"/>, applied from the parent up since the leaf itself is discarded).</summary>
+    private static void RemoveLeaf(TestNode leaf)
+    {
+        var status = leaf.Status;
+        var dur = leaf.Duration;
+        for (TestNode? n = leaf.Parent; n is not null; n = n.Parent)
+        {
+            n.Counts[(int)status]--;
+            n.TotalLeaves--;
+            n.RollupDuration -= dur;
+        }
+        leaf.Parent?.RemoveChild(leaf.KeyInParent!);
     }
 
     // --- Phase 3: project registration, build phase & diagnostics ---------------
@@ -497,9 +614,16 @@ public static class Reducer
         return LaunchRun(s, subset);
     }
 
-    /// <summary>Request a run launch (the orchestrator dispatches each new generation once).</summary>
+    /// <summary>Request a run launch (the orchestrator dispatches each new generation once). <see cref="AppState.RunTotal"/>
+    /// (the <c>m</c> in the watch header's <c>running (n/m)</c>) is the subset size, or the whole tree for a run-all.</summary>
     private static AppState LaunchRun(AppState s, IReadOnlyList<TestCaseId> subset) =>
-        s with { RunGeneration = s.RunGeneration + 1, RunSubset = subset, Running = true };
+        s with
+        {
+            RunGeneration = s.RunGeneration + 1,
+            RunSubset = subset,
+            Running = true,
+            RunTotal = subset.Count == 0 ? s.TotalTests : subset.Count,
+        };
 
     // --- 'o' modal (M5) ---------------------------------------------------------
 

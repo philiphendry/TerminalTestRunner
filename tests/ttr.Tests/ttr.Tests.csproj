@@ -12,6 +12,10 @@
     <ProjectReference Include="../../src/ttr.Ui/ttr.Ui.csproj" />
     <ProjectReference Include="../../src/ttr.Runners/ttr.Runners.csproj" />
     <ProjectReference Include="../../src/ttr.Build/ttr.Build.csproj" />
+    <!-- Phase 5: the watch subsystem (Debouncer, watch sources, coordinator) lives in the composition
+         root; the test project references it to unit/integration-test that code (referencing an Exe
+         project is supported — its output assembly is used). -->
+    <ProjectReference Include="../../src/ttr.Cli/ttr.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

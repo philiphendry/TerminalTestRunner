@@ -82,10 +82,12 @@ public static class FrameBuilder
         var wall = s.ShowDurations || s.Running
             ? $" · {DetailComposer.FormatDuration(TimeSpan.FromMilliseconds(info.RunWallClockMs))}"
             : "";
+        var watch = s.Watch != WatchKind.Off ? $" · watch: {WatchSegment(s)}" : "";
         var left = $"ttr · {s.ScenarioName} · {s.TotalTests} tests · " +
                    $"{s.Passed}✓ {s.Failed}✗ {s.Skipped}⊘" +
                    (s.Running ? $" · running {s.RunningCount}" : "") +
                    wall +
+                   watch +
                    (flags.Length > 0 ? $" · [{flags}]" : "");
         var right = $"fps {info.Fps:0} · p95 {info.LatencyP95Ms:0}ms";
 
@@ -95,6 +97,36 @@ public static class FrameBuilder
             return left + new string(' ', gap) + right;
         }
         return Cells.FitPad(left, width);
+    }
+
+    /// <summary>The watch header state (plan §9, brief M1): idle / change detected / building &lt;proj&gt; /
+    /// running (n/m) / queued (change during run). building and running derive from the run/build flags;
+    /// the coordinator supplies the change-detected / queued / idle activity.</summary>
+    private static string WatchSegment(AppState s)
+    {
+        if (s.Running)
+            return s.WatchActivity == WatchActivity.Queued
+                ? "queued (change during run)"
+                : $"running ({RunDone(s)}/{s.RunTotal})";
+        if (s.Busy)
+        {
+            var proj = BuildingProject(s);
+            return proj is null ? "building" : $"building {proj}";
+        }
+        return s.WatchActivity switch
+        {
+            WatchActivity.ChangeDetected or WatchActivity.Queued => "change detected",
+            _ => "idle",
+        };
+    }
+
+    private static int RunDone(AppState s) => Math.Max(0, s.RunTotal - s.RunningCount - s.Root.Queued);
+
+    private static string? BuildingProject(AppState s)
+    {
+        foreach (var child in s.Root.Children)
+            if (child.BuildPhase == BuildPhase.Building) return child.Name;
+        return null;
     }
 
     private static string Footer(AppState s, int width)

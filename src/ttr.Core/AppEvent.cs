@@ -61,6 +61,37 @@ public abstract record AppEvent
     /// <summary>The run finished. The reducer sweeps any still-Running leaves to NotRun (no phantom spinners).</summary>
     public sealed record RunCompleted : AppEvent;
 
+    // --- Watch subsystem (Phase 5, plan §9) ------------------------------------
+
+    /// <summary>
+    /// The watch coordinator's coarse activity changed (plan §9). Carries only the states that aren't
+    /// already observable from <see cref="AppState.Busy"/> (building) or <see cref="AppState.Running"/>
+    /// (running): a detected-but-not-yet-built change, a change queued behind an active run, or a return
+    /// to idle. Ignored when not in watch mode.
+    /// </summary>
+    public sealed record WatchStateChanged(WatchActivity Activity) : AppEvent;
+
+    /// <summary>
+    /// A re-discovery cycle is beginning for <paramref name="ProjectPaths"/> (plan §8, brief M3): the
+    /// reducer tombstones every existing leaf under those projects. Surviving tests are un-tombstoned as
+    /// their <see cref="TestsDiscovered"/> events re-arrive; <see cref="RediscoveryCompleted"/> then sweeps
+    /// whatever is still tombstoned (the removed tests). Kept tests retain their status/detail — the diff
+    /// never blanks a result.
+    /// </summary>
+    public sealed record RediscoveryStarted(IReadOnlyList<string> ProjectPaths) : AppEvent;
+
+    /// <summary>Re-discovery finished for <paramref name="ProjectPaths"/>: remove any still-tombstoned leaf,
+    /// prune emptied branches, and keep selection valid (move to the nearest survivor). Brief M3.</summary>
+    public sealed record RediscoveryCompleted(IReadOnlyList<string> ProjectPaths) : AppEvent;
+
+    /// <summary>
+    /// The watch cycle asks to auto-rerun the affected test set (plan §9): all leaves under
+    /// <paramref name="ProjectPaths"/>, narrowed to failed-only when the 'f' filter is active (AC7). The
+    /// reducer marks them <see cref="TestStatus.Queued"/> and launches a run — or, if a run is already
+    /// active, coalesces them into the ONE consolidated follow-up run (reusing the Phase 4 queue, AC6).
+    /// </summary>
+    public sealed record WatchRerunRequested(IReadOnlyList<string> ProjectPaths) : AppEvent;
+
     /// <summary>Off-thread syntax highlighting for the open 'o' modal is ready (plan §11.5): one span
     /// list per source line.</summary>
     public sealed record HighlightReady(string FilePath, IReadOnlyList<IReadOnlyList<HlSpan>> Lines) : AppEvent;

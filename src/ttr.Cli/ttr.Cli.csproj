@@ -20,4 +20,10 @@
     <PackageReference Include="Microsoft.Build.Locator" />
   </ItemGroup>
 
+  <!-- The watch subsystem (Watch/*) is tested from ttr.Tests; expose its internals (e.g. the
+       SourceWatchSource relevance/classification helpers) to that assembly only. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="ttr.Tests" />
+  </ItemGroup>
+
 </Project>

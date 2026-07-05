@@ -90,3 +90,20 @@ jobs:
           dotnet build fixtures/matrix/MultiTfm.Tests --configuration Debug --framework net10.0
       - name: Assert exit-code correctness on real runs
         run: bash scripts/dogfood-exit-codes.sh "$(pwd)/src/ttr.Cli/bin/Debug/net10.0/ttr.dll" "$(pwd)/fixtures/matrix"
+
+  # Watch-mode latency (brief M7 / AC5, closing POC-6 AC2): drive real watch cycles over fixtures/watch and
+  # assert the T0→T4 median < 4 s bar on a normal (non-mounted) filesystem. This is the AUTHORITATIVE lane
+  # for the bar — the agent sandbox's host-mounted FS is ~7× slower and not representative (see notes).
+  watch-latency:
+    name: watch latency < 4s (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Measure watch cycle latency (fails if T0→T4 median ≥ 4s)
+        run: bash scripts/watch-latency.sh 6

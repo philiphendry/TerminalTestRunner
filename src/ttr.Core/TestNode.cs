@@ -83,6 +83,13 @@ public sealed class TestNode
     /// </summary>
     public NodeNotice? Notice { get; set; }
 
+    /// <summary>
+    /// Re-discovery tombstone (brief M3): set on every leaf under a project when a re-discovery cycle
+    /// starts, cleared as each surviving test's <see cref="AppEvent.TestsDiscovered"/> re-arrives, then
+    /// swept (removed) if still set when the cycle completes. Reducer-only, transient — never persisted.
+    /// </summary>
+    public bool PendingRemoval { get; set; }
+
     /// <summary>Per-status leaf counts of this subtree (index by <see cref="TestStatus"/>).</summary>
     public int[] Counts { get; } = new int[7];
 
@@ -94,11 +101,24 @@ public sealed class TestNode
 
     public TestNode? FindChild(string key) => _childrenByKey.GetValueOrDefault(key);
 
+    /// <summary>The structural key this node was added under (its key in <see cref="Parent"/>'s child map).
+    /// Recorded so the re-discovery sweep can remove a node without re-deriving its key. Set by
+    /// <see cref="AddChild"/>.</summary>
+    public string? KeyInParent { get; private set; }
+
     public TestNode AddChild(string key, TestNode child)
     {
         _childrenByKey[key] = child;
         Children.Add(child);
+        child.KeyInParent = key;
         return child;
+    }
+
+    /// <summary>Remove a child by its structural key (re-discovery removal, brief M3). Reducer-only.</summary>
+    public void RemoveChild(string key)
+    {
+        if (_childrenByKey.Remove(key, out var child))
+            Children.Remove(child);
     }
 
     // --- Rollup helpers (branch display state derived from leaf counters) ---

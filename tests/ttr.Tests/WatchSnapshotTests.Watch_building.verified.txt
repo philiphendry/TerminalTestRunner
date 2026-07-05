@@ -1,0 +1,16 @@
+﻿ttr · watch · 3 tests · 2✓ 1✗ 0⊘ · watch: building Watch.Sample.Tests                fps 0 · p95 0ms
+✗ watch                                                                                        1✗ 2✓
+  ⠋ Watch.Sample.Tests                                                                      building
+    ✗ Watch.Sample                                                                             1✗ 2✓
+      ✗ CalculatorTests                                                                        1✗ 2✓
+        ✓ Add_ReturnsSum                                                                            
+        ✗ Subtract_ReturnsDifference                                                                
+        ✓ Multiply_ReturnsProduct                                                                   
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

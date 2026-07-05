@@ -49,7 +49,7 @@ public sealed class RenderLoop
             if (sizeChanged)
                 events.TryWrite(new AppEvent.Resized(width, height));
 
-            var tickDue = state.Running && now - lastTickMs >= SpinnerIntervalMs;
+            var tickDue = (state.Running || state.Busy) && now - lastTickMs >= SpinnerIntervalMs;
             var dirty = state.Revision != lastRevision || sizeChanged || tickDue;
 
             if (!dirty)

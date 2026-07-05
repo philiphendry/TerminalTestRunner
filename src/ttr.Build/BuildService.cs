@@ -50,7 +50,7 @@ public static partial class BuildService
         catch (IOException) { return DateTime.MinValue; }
     }
 
-    public static async Task<BuildOutcome> BuildAsync(string projectPath, CancellationToken ct)
+    public static async Task<BuildOutcome> BuildAsync(string projectPath, CancellationToken ct, bool noRestore = false)
     {
         var psi = new ProcessStartInfo("dotnet")
         {
@@ -61,6 +61,9 @@ public static partial class BuildService
         };
         psi.ArgumentList.Add("build");
         psi.ArgumentList.Add(projectPath);
+        // Watch rebuilds skip restore (the target set was restored at startup) — POC-6's warm cycle budget
+        // assumes no per-cycle restore; a project-file change re-enables it (a new package may be needed).
+        if (noRestore) psi.ArgumentList.Add("--no-restore");
         psi.ArgumentList.Add("--nologo");
         psi.ArgumentList.Add("-v:quiet");
         psi.ArgumentList.Add("-tl:off");

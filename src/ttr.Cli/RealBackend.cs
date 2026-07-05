@@ -25,6 +25,8 @@ public sealed class RealBackend : ITestSessionAdapter
     private readonly IReadOnlyList<SolutionError> _solutionErrors;
     private readonly bool _noBuild;
     private readonly string? _logPath;
+    private readonly EvaluationService? _evaluator;
+    private readonly TtrConfig? _config;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<ProjectEvaluation> _registered = [];
@@ -37,13 +39,17 @@ public sealed class RealBackend : ITestSessionAdapter
         IReadOnlyList<PhantomProject> phantoms,
         IReadOnlyList<SolutionError> solutionErrors,
         bool noBuild,
-        string? logPath = null)
+        string? logPath = null,
+        EvaluationService? evaluator = null,
+        TtrConfig? config = null)
     {
         _projects = projects;
         _phantoms = phantoms;
         _solutionErrors = solutionErrors;
         _noBuild = noBuild;
         _logPath = logPath;
+        _evaluator = evaluator;
+        _config = config;
     }
 
     /// <summary>The MTP server versions observed at handshake (project → serverInfo.version), for the notes/PR.</summary>
@@ -76,6 +82,13 @@ public sealed class RealBackend : ITestSessionAdapter
                     proj.ProjectPath, proj.DisplayName, proj.TfmMonikers, runner, notice));
                 _registered.Add(proj);
             }
+
+            // Watch mode over a target with no test projects stays alive with a notice instead of exiting
+            // (plan §4, brief M6) — a project may still be added/built while watching.
+            if (_registered.Count == 0)
+                events.TryWrite(new AppEvent.NoticeRaised("no-test-projects", "no test projects",
+                    new NodeNotice(NoticeSeverity.Warning, "no test projects in the target(s) yet",
+                        "Add or build a test project and it will appear on the next watch cycle.")));
 
             // 3. Build stale projects in parallel (§7); discovery is gated on build success per project.
             var built = await BuildProjectsAsync(_registered, events, ct).ConfigureAwait(false);
@@ -142,12 +155,87 @@ public sealed class RealBackend : ITestSessionAdapter
         finally { _gate.Release(); }
     }
 
+    // --- Watch cycle (Phase 5, plan §9) ----------------------------------------
+
+    /// <summary>The registered test projects' paths (populated during <see cref="DiscoverAsync"/>) — the
+    /// set the watch coordinator intersects the dependents closure against.</summary>
+    public IReadOnlyList<string> RegisteredTestProjectPaths => _registered.Select(p => p.ProjectPath).ToList();
+
+    /// <summary>
+    /// A watch cycle's build + re-discovery (plan §9, brief M4/M5): rebuild the affected test projects in
+    /// PARALLEL (<paramref name="forceBuild"/> for source mode, since a dependency edit leaves the test
+    /// project's own sources looking fresh; off for external mode, whose assemblies are already built), then
+    /// for each project that built, re-discover through the persistent adapters (MTP host restarted on the
+    /// rebuild) bracketed by <see cref="AppEvent.RediscoveryStarted"/>/<see cref="AppEvent.RediscoveryCompleted"/>
+    /// so the reducer diffs the tree. Discovery is gated on build success — a compile error surfaces the
+    /// Phase 3 error node and drops that project before discovery. Returns the projects that were re-discovered
+    /// (the auto-rerun set). Shares the discovery/run gate so it never overlaps an in-flight run.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> RediscoverAsync(
+        IReadOnlyCollection<string> affectedProjectPaths, ChannelWriter<AppEvent> events,
+        CancellationToken ct, bool forceBuild, bool noRestore = false, Watch.WatchLog? log = null, int cycle = 0)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var affected = _registered.Where(p => affectedProjectPaths.Contains(p.ProjectPath)).ToList();
+            if (affected.Count == 0) return [];
+
+            var built = await BuildProjectsAsync(affected, events, ct, force: forceBuild, noRestore: noRestore).ConfigureAwait(false);
+            log?.Mark(cycle, Watch.WatchLog.BuildsDone);   // T2: parallel builds done
+            var toRediscover = affected.Where(p => built.Contains(p.ProjectPath)).ToList();
+            if (toRediscover.Count == 0) return [];   // every build failed → cycle stops before discovery
+
+            var paths = toRediscover.Select(p => p.ProjectPath).ToList();
+            events.TryWrite(new AppEvent.RediscoveryStarted(paths));
+            await DiscoverProjectsAsync(toRediscover, events, ct, rediscover: true).ConfigureAwait(false);
+            log?.Mark(cycle, Watch.WatchLog.DiscoverDone);   // T3: re-discovery done
+            events.TryWrite(new AppEvent.RediscoveryCompleted(paths));
+            return paths;
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Re-evaluate the given projects (a <c>.csproj/.props/.targets</c> change, plan §9 — changed
+    /// project only) and re-emit their <see cref="AppEvent.ProjectRegistered"/> so detection/TFM changes
+    /// take effect. Best-effort: a project that fails to re-evaluate keeps its previous evaluation.</summary>
+    public async Task ReevaluateAsync(
+        IEnumerable<string> projectPaths, ChannelWriter<AppEvent> events, CancellationToken ct)
+    {
+        if (_evaluator is null) return;
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            foreach (var raw in projectPaths.Distinct(StringComparer.Ordinal))
+            {
+                var full = Path.GetFullPath(raw);
+                var index = _registered.FindIndex(p => string.Equals(p.ProjectPath, full, StringComparison.Ordinal));
+                if (index < 0) continue;   // not a registered test project — nothing to refresh
+                try
+                {
+                    var reEval = _evaluator.Evaluate(full, _config?.OverrideFor(full));
+                    _registered[index] = reEval;
+                    var (runner, notice) = Classify(reEval);
+                    if (runner is not RunnerKind.NotATest)
+                        events.TryWrite(new AppEvent.ProjectRegistered(
+                            reEval.ProjectPath, reEval.DisplayName, reEval.TfmMonikers, runner, notice));
+                }
+                catch (Exception) { /* keep the previous evaluation; the rebuild will still run */ }
+            }
+        }
+        finally { _gate.Release(); }
+    }
+
     // --- Build + discover shared helpers ---------------------------------------
 
     /// <summary>Build the stale members of <paramref name="projects"/> in parallel; up-to-date projects pass
-    /// through. Returns the set of project paths ready to discover/run (built OK or already fresh).</summary>
+    /// through. Returns the set of project paths ready to discover/run (built OK or already fresh). When
+    /// <paramref name="force"/> is set (watch mode A), EVERY project builds regardless of self-staleness —
+    /// a cross-project source edit doesn't touch the dependent test project's own sources, so its output
+    /// timestamp looks fresh even though a referenced library changed (the graph closure is the authority).</summary>
     private async Task<HashSet<string>> BuildProjectsAsync(
-        IReadOnlyList<ProjectEvaluation> projects, ChannelWriter<AppEvent> events, CancellationToken ct)
+        IReadOnlyList<ProjectEvaluation> projects, ChannelWriter<AppEvent> events, CancellationToken ct,
+        bool force = false, bool noRestore = false)
     {
         var ready = new HashSet<string>(StringComparer.Ordinal);
         if (_noBuild)
@@ -156,13 +244,13 @@ public sealed class RealBackend : ITestSessionAdapter
             return ready;   // --no-build: discover/run against existing binaries (plan §7)
         }
 
-        var stale = projects.Where(IsStale).ToList();
+        var stale = force ? projects.ToList() : projects.Where(IsStale).ToList();
         foreach (var p in projects.Where(p => !stale.Contains(p))) ready.Add(p.ProjectPath);
 
         var results = await Task.WhenAll(stale.Select(async p =>
         {
             events.TryWrite(new AppEvent.BuildStarted(p.ProjectPath));
-            var outcome = await BuildService.BuildAsync(p.ProjectPath, ct).ConfigureAwait(false);
+            var outcome = await BuildService.BuildAsync(p.ProjectPath, ct, noRestore).ConfigureAwait(false);
             if (outcome.Success)
                 events.TryWrite(new AppEvent.BuildSucceeded(p.ProjectPath));
             else
