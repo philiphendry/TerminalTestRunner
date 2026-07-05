@@ -83,11 +83,15 @@ public static class FrameBuilder
             ? $" · {DetailComposer.FormatDuration(TimeSpan.FromMilliseconds(info.RunWallClockMs))}"
             : "";
         var watch = s.Watch != WatchKind.Off ? $" · watch: {WatchSegment(s)}" : "";
+        // The restore notice appears only after a --continue restore (null otherwise → non-restore headers
+        // stay byte-identical). It is dropped from the header once a run replaces every restored result.
+        var restore = s.RestoreNotice is { } rn ? $" · {rn}" : "";
         var left = $"ttr · {s.ScenarioName} · {s.TotalTests} tests · " +
                    $"{s.Passed}✓ {s.Failed}✗ {s.Skipped}⊘" +
                    (s.Running ? $" · running {s.RunningCount}" : "") +
                    wall +
                    watch +
+                   restore +
                    (flags.Length > 0 ? $" · [{flags}]" : "");
         var right = $"fps {info.Fps:0} · p95 {info.LatencyP95Ms:0}ms";
 

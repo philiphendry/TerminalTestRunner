@@ -1,14 +1,18 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Ttr.Core;
+using Ttr.Core.Persistence;
 using Ttr.Ui;
 
 namespace Ttr.Cli;
 
 /// <summary>
 /// Launches side effects in reaction to reducer-produced state (plan invariant 1): rerun requests,
-/// off-thread syntax highlighting for the 'o' modal, and toast auto-expiry. Invoked on the reducer
-/// thread after each state change; it only kicks off cancellable tasks that feed events back onto the
-/// one channel — it never blocks the reducer or mutates state.
+/// off-thread syntax highlighting for the 'o' modal, toast auto-expiry, and (Phase 6) session saves after
+/// every run and lazy loads of restored result details. Invoked on the reducer thread after each state
+/// change; it only kicks off cancellable tasks that feed events back onto the one channel — it never blocks
+/// the reducer or mutates state. The save SNAPSHOT is taken here on the reducer thread (cheap, safe), and the
+/// serialise+write happens on a background task, so the reducer/render loop never stalls on disk I/O (brief M3).
 /// </summary>
 public sealed class Orchestrator
 {
@@ -16,19 +20,23 @@ public sealed class Orchestrator
     private readonly TestTarget _target;
     private readonly ChannelWriter<AppEvent> _events;
     private readonly CancellationToken _ct;
+    private readonly SessionStore? _store;
 
     private long _lastRunGeneration;
     private long _lastToastId;
     private string? _lastModalPath;
+    private TestCaseId? _lastDetailSelection;
+    private readonly ConcurrentDictionary<TestCaseId, byte> _detailRequested = new();
 
     public Orchestrator(
         ITestSessionAdapter? adapter, ChannelWriter<AppEvent> events, CancellationToken ct,
-        TestTarget? target = null)
+        TestTarget? target = null, SessionStore? store = null)
     {
         _adapter = adapter;
         _target = target ?? new TestTarget("");
         _events = events;
         _ct = ct;
+        _store = store;
     }
 
     public void OnReduced(AppState prev, AppState next)
@@ -38,6 +46,18 @@ public sealed class Orchestrator
             _lastRunGeneration = next.RunGeneration;
             if (_adapter is not null) Launch(RunEffect(next.RunSubset));   // real read-only mode has no adapter
         }
+
+        // Save after every completed run (including watch auto-runs, brief M3): a run just ended when Running
+        // fell. The snapshot is captured now (reducer thread); the write is backgrounded.
+        if (_store is not null && prev.Running && !next.Running)
+        {
+            var snapshot = SessionSnapshot.Capture(next);
+            Launch(SaveEffect(snapshot));
+        }
+
+        // Lazy-load a restored result's detail the moment it is selected (brief M5) — so the detail pane and
+        // 'o' have content by the time the user opens them, without ever preloading all details.
+        if (_store is not null) MaybeFetchDetail(next);
 
         if (next.Modal is { } m)
         {
@@ -64,6 +84,39 @@ public sealed class Orchestrator
         if (_adapter is null) return;
         try { await _adapter.RunAsync(_target, subset, _events, _ct); }
         catch (OperationCanceledException) { /* shutdown */ }
+    }
+
+    private async Task SaveEffect(SessionSnapshot snapshot)
+    {
+        try { await Task.Run(() => _store!.Save(snapshot), _ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* shutdown */ }
+        catch (Exception) { /* persistence is best-effort; never disturb the session */ }
+    }
+
+    /// <summary>If the selected leaf is a restored result whose detail lives on disk (and hasn't been requested
+    /// yet), fetch it off-thread and feed it back as <see cref="AppEvent.DetailLoaded"/>.</summary>
+    private void MaybeFetchDetail(AppState s)
+    {
+        if (s.Selection is not { } sel) return;
+        if (sel.Equals(_lastDetailSelection)) return;   // only on a selection change (not every run event)
+        _lastDetailSelection = sel;
+        TestNode? node = null;
+        foreach (var row in s.Rows)
+            if (row.Node.Id.Equals(sel)) { node = row.Node; break; }
+        if (node is null || !node.HasRestoredDetail || node.Detail is not null) return;
+        if (!_detailRequested.TryAdd(node.Id, 0)) return;
+        Launch(DetailEffect(node.Id));
+    }
+
+    private async Task DetailEffect(TestCaseId id)
+    {
+        try
+        {
+            var detail = await Task.Run(() => _store!.ReadDetail(id), _ct).ConfigureAwait(false);
+            if (detail is not null) _events.TryWrite(new AppEvent.DetailLoaded(id, detail));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { /* best-effort; leave the node without detail */ }
     }
 
     private async Task HighlightEffect(string path)

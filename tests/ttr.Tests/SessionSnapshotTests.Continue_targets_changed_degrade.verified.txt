@@ -1,0 +1,16 @@
+﻿ttr · Sample.slnx · 5 tests · 0✓ 0✗ 0⊘                                               fps 0 · p95 0ms
+○ Sample.slnx                                                                                     5○
+  ○ Sample.Tests                                                                                  5○
+    ○ Sample                                                                                      5○
+      ○ CalculatorTests                                                                           3○
+        ○ Add_ReturnsSum                                                                            
+        ○ Subtract_ReturnsDifference                                                                
+        ○ Divide_ReturnsQuotient                                                                    
+      ○ StringTests                                                                               2○
+        ○ Trim_RemovesWhitespace                                                                    
+        ○ Upper_IsSkipped                                                                           
+                                                                                                    
+                                                                                                    
+                                                                                                    
+• targets changed since last session — starting fresh                                               
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

@@ -40,6 +40,9 @@ public static class Reducer
             AppEvent.Resized r => Resized(s, r),
             AppEvent.KeyPressed k => Key(s, k.Key),
             AppEvent.HighlightReady h => HighlightReady(s, h),
+            AppEvent.SessionRestored r => SessionRestored(s, r),
+            AppEvent.DetailLoaded d => DetailLoaded(s, d),
+            AppEvent.Toast t => Toast(s, t.Message),
             AppEvent.ToastExpired t => ToastExpired(s, t),
             AppEvent.FatalError f => Fatal(s, f),
             _ => s,
@@ -75,6 +78,7 @@ public static class Reducer
         var structural = false;
         var expanded = s.Expanded.ToBuilder();
         var leaf = EnsureLeaf(s.Root, t.Test, expanded, ref structural);
+        SetStale(leaf, false);   // a real run replaces staleness with reality (plan §10)
         ApplyStatus(leaf, TestStatus.Running);
         var next = s with
         {
@@ -90,6 +94,8 @@ public static class Reducer
         var structural = false;
         var expanded = s.Expanded.ToBuilder();
         var leaf = EnsureLeaf(s.Root, t.Test, expanded, ref structural);
+        SetStale(leaf, false);   // fresh result replaces any staleness (plan §10)
+        leaf.HasRestoredDetail = false;
         ApplyStatus(leaf, t.Outcome switch
         {
             TestOutcome.Passed => TestStatus.Passed,
@@ -125,7 +131,8 @@ public static class Reducer
             if (leaf.Status is TestStatus.Running or TestStatus.Queued)
                 ApplyStatus(leaf, TestStatus.NotRun);
 
-        var next = s with { Running = false };
+        // A completed run makes the results real again, so the "restored from …" notice has served its purpose.
+        var next = s with { Running = false, RestoreNotice = null };
 
         // Coalesced follow-up (plan §9): reruns requested while this run was active launch now, once.
         if (s.QueuedRerunAll || !s.QueuedRerun.IsEmpty)
@@ -171,7 +178,16 @@ public static class Reducer
         foreach (var path in d.ProjectPaths)
         {
             var project = s.Root.FindChild(path);
-            if (project is not null) changed |= SweepTombstoned(project);
+            if (project is null) continue;
+            changed |= SweepTombstoned(project);
+            // The affected projects were just rebuilt: every kept result is now for the OLD binary until the
+            // auto-rerun replaces it, so mark those leaves Stale (dim). Newly-added (NotRun) leaves and
+            // still-running ones are untouched; the rerun's TestStarted/TestFinished clears the flag (§10,
+            // Phase 5 feed-forward). This also composes with --continue: a restored result goes Stale on the
+            // first watch rebuild exactly as a live one does.
+            foreach (var leaf in Leaves(project))
+                if (leaf.Status is TestStatus.Passed or TestStatus.Failed or TestStatus.Skipped)
+                { SetStale(leaf, true); changed = true; }
         }
         if (!changed) return s;
         return NormalizeView(RebuildRows(s with { TreeVersion = s.TreeVersion + 1 }), prevIndex);
@@ -242,11 +258,13 @@ public static class Reducer
     {
         var status = leaf.Status;
         var dur = leaf.Duration;
+        var stale = leaf.StaleLeaves;   // 0 or 1
         for (TestNode? n = leaf.Parent; n is not null; n = n.Parent)
         {
             n.Counts[(int)status]--;
             n.TotalLeaves--;
             n.RollupDuration -= dur;
+            n.StaleLeaves -= stale;
         }
         leaf.Parent?.RemoveChild(leaf.KeyInParent!);
     }
@@ -721,6 +739,77 @@ public static class Reducer
             ? s with { Modal = m with { Highlighted = h.Lines } }
             : s;
 
+    // --- Sessions (Phase 6, plan §10) ------------------------------------------
+
+    /// <summary>
+    /// Attach a restored session to the freshly-discovered tree (brief M4). Runs AFTER discovery, so leaves
+    /// exist: each restored result is matched to its leaf by derived id (survive-by-id), its status/duration
+    /// applied, its staleness overlaid, and its on-disk detail flagged for lazy load; restored ids with no
+    /// surviving leaf are dropped and counted. Then the restored UI state is applied — filters/pane/wrap/times,
+    /// the expansion id-set (replacing the auto-expanded default so the user's collapse state returns), the
+    /// selection (nearest-survivor if gone), and the two scroll offsets, clamped to the new tree.
+    /// </summary>
+    private static AppState SessionRestored(AppState s, AppEvent.SessionRestored r)
+    {
+        var byId = new Dictionary<TestCaseId, TestNode>();
+        foreach (var leaf in Leaves(s.Root)) byId[leaf.Id] = leaf;
+
+        var matched = 0;
+        var dropped = 0;
+        foreach (var result in r.Results)
+        {
+            if (!byId.TryGetValue(result.Id, out var leaf)) { dropped++; continue; }
+            matched++;
+            ApplyStatus(leaf, result.Status);
+            SetDuration(leaf, result.Duration);
+            SetStale(leaf, result.Stale);
+            leaf.HasRestoredDetail = result.HasDetail;   // detail loads lazily (brief M5)
+        }
+
+        // Apply the restored UI. Pane/filter flags first (they change layout + which rows flatten), then the
+        // expansion set (id-keyed, so it survives across sessions), then selection + scroll.
+        var ui = r.Ui;
+        var expanded = ImmutableHashSet<TestCaseId>.Empty.ToBuilder();
+        expanded.Add(s.Root.Id);   // the root is always expandable-open
+        foreach (var id in ui.Expanded) expanded.Add(new TestCaseId(id));
+
+        var restored = s with
+        {
+            FailedOnly = ui.FailedOnly,
+            ShowDurations = ui.ShowDurations,
+            DetailVisible = ui.DetailVisible,
+            DetailOrientation = ui.DetailBottom ? DetailOrientation.Beneath : DetailOrientation.Right,
+            WordWrap = ui.WordWrap,
+            Focus = PaneFocus.Tree,
+            Expanded = expanded.ToImmutable(),
+            Selection = ui.Selected is { Length: > 0 } sel ? new TestCaseId(sel) : s.Selection,
+            DetailScroll = Math.Max(0, ui.DetailScroll),
+            ScrollOffset = Math.Max(0, ui.TreeScroll),
+            TreeVersion = s.TreeVersion + 1,
+            RestoreNotice = $"restored {matched} result{(matched == 1 ? "" : "s")} from {r.RelativeTime}"
+                            + (dropped > 0 ? $" · {dropped} gone" : ""),
+        };
+
+        // Relayout for the restored pane flags, rebuild rows for the restored filter/expansion, then keep the
+        // selection valid (nearest survivor) and re-clamp scroll to the restored offset.
+        var laidOut = Relayout(restored);
+        return NormalizeView(RebuildRows(laidOut), laidOut.ScrollOffset);
+    }
+
+    /// <summary>A restored leaf's rich detail arrived from disk (brief M5): attach it and derive its file
+    /// references exactly as a live finish would, and clear the lazy-load flag. Ignored if the leaf is gone or
+    /// already has live detail (a real run beat the fetch).</summary>
+    private static AppState DetailLoaded(AppState s, AppEvent.DetailLoaded d)
+    {
+        TestNode? leaf = null;
+        foreach (var l in Leaves(s.Root))
+            if (l.Id.Equals(d.Id)) { leaf = l; break; }
+        if (leaf is null || !leaf.HasRestoredDetail) return s;
+        leaf.HasRestoredDetail = false;
+        AttachDetail(leaf, d.Detail);
+        return s with { };   // detail pane / modal re-projects from the node; bump the revision to redraw
+    }
+
     private static AppState ToastExpired(AppState s, AppEvent.ToastExpired t) =>
         s.Toast is not null && s.ToastId == t.Id ? Relayout(s with { Toast = null }) : s;
 
@@ -874,6 +963,19 @@ public static class Reducer
             n.Counts[(int)next]++;
         }
         leaf.Status = next;
+    }
+
+    /// <summary>Set/clear a leaf's staleness overlay (plan §10), propagating the subtree
+    /// <see cref="TestNode.StaleLeaves"/> counter up the ancestor chain like the status counters. A no-op on a
+    /// branch and when the flag already holds — so it is safe to call unconditionally on any run/rebuild event.</summary>
+    private static void SetStale(TestNode leaf, bool stale)
+    {
+        if (leaf.Children.Count > 0) return;
+        var current = leaf.StaleLeaves > 0;
+        if (current == stale) return;
+        var delta = stale ? 1 : -1;
+        for (TestNode? n = leaf; n is not null; n = n.Parent)
+            n.StaleLeaves += delta;
     }
 
     /// <summary>

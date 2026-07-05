@@ -96,6 +96,27 @@ public abstract record AppEvent
     /// list per source line.</summary>
     public sealed record HighlightReady(string FilePath, IReadOnlyList<IReadOnlyList<HlSpan>> Lines) : AppEvent;
 
+    // --- Sessions (Phase 6, plan §10) ------------------------------------------
+
+    /// <summary>
+    /// A prior session's state was loaded and validated (brief M4) — emitted AFTER discovery so the tree is
+    /// populated. The reducer attaches each <see cref="RestoredResult"/> to its discovered leaf by derived id
+    /// (dropping ids that no longer exist, counting them for the notice), marks the stale ones, then applies
+    /// the restored <see cref="RestoredUi"/> (expansion / selection / filters / pane / scroll, clamped to the
+    /// new tree). <paramref name="RelativeTime"/> is the CLI-formatted "&lt;n&gt; ago" of the save (kept out of
+    /// the pure reducer so it stays deterministic), used to build the header notice.
+    /// </summary>
+    public sealed record SessionRestored(
+        IReadOnlyList<RestoredResult> Results, RestoredUi Ui, string RelativeTime) : AppEvent;
+
+    /// <summary>A rich result detail was lazily loaded from disk for a restored leaf (brief M5): the reducer
+    /// attaches it (and re-derives file references) exactly as a live <see cref="TestFinished"/> would.</summary>
+    public sealed record DetailLoaded(TestCaseId Id, TestResultDetail Detail) : AppEvent;
+
+    /// <summary>A transient toast raised by the composition root (e.g. a <c>--continue</c> degrade notice) —
+    /// distinct from the reducer's own internal toasts so it flows through the one channel (plan Appendix B).</summary>
+    public sealed record Toast(string Message) : AppEvent;
+
     /// <summary>A transient toast's lifetime elapsed; the reducer clears it iff the id still matches.</summary>
     public sealed record ToastExpired(long Id) : AppEvent;
 

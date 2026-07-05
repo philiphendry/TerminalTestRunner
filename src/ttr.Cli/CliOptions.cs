@@ -4,9 +4,9 @@ using Ttr.Core;
 namespace Ttr.Cli;
 
 /// <summary>
-/// The command surface (plan §3). <c>--fake</c>, real targets, <c>--no-build</c>, <c>--log</c>, and (Phase 5)
-/// <c>--watch [build|external]</c> are functional; <c>--continue</c>/<c>--tfm</c>/<c>--state-dir</c> remain
-/// reserved (defined so they parse, but reject with "not yet implemented", exit 2).
+/// The command surface (plan §3). <c>--fake</c>, real targets, <c>--no-build</c>, <c>--log</c>,
+/// <c>--watch [build|external]</c>, and (Phase 6) <c>--continue</c>/<c>--state-dir</c> are functional;
+/// only <c>--tfm</c> remains reserved (defined so it parses, but rejects with "not yet implemented", exit 2).
 /// </summary>
 public sealed class CliOptions
 {
@@ -26,10 +26,11 @@ public sealed class CliOptions
     };
     public Option<bool> NoBuild { get; } = new("--no-build") { Description = "Discover/run against existing binaries; never build." };
 
+    public Option<bool> Continue { get; } = new("--continue") { Description = "Restore the previous session (results, UI, expansion); changed results show as Stale." };
+    public Option<string?> StateDir { get; } = new("--state-dir") { Description = "Override the .ttr/ state directory location." };
+
     // --- Reserved for later phases (defined-but-rejecting) ---
-    public Option<bool> Continue { get; } = new("--continue") { Description = "(reserved) Restore previous session." };
     public Option<string?> Tfm { get; } = new("--tfm") { Description = "(reserved) Restrict to one TFM." };
-    public Option<string?> StateDir { get; } = new("--state-dir") { Description = "(reserved) Override .ttr/ location." };
     public Option<string?> Log { get; } = new("--log") { Description = "(reserved) Diagnostic log path." };
 
     public RootCommand BuildRoot()
@@ -52,8 +53,7 @@ public sealed class CliOptions
     /// for unsupplied options (carrying their default), so presence is detected via
     /// <see cref="OptionResult.Implicit"/> being false.
     /// </summary>
-    public bool AnyReserved(ParseResult pr) =>
-        IsSupplied(pr, Continue) || IsSupplied(pr, Tfm) || IsSupplied(pr, StateDir);
+    public bool AnyReserved(ParseResult pr) => IsSupplied(pr, Tfm);
 
     public bool IsSupplied(ParseResult pr, Option option) =>
         pr.GetResult(option) is { Implicit: false };

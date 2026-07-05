@@ -93,6 +93,14 @@ public sealed record AppState
     // --- Overlays & toast (M5/M6) ----------------------------------------------
     public ModalState? Modal { get; init; }
     public bool HelpVisible { get; init; }
+    /// <summary>
+    /// A restored-session header notice ("restored N results from &lt;relative time&gt;", Phase 6 brief M1),
+    /// shown only after a <c>--continue</c> restore — null otherwise, so every non-restore snapshot stays
+    /// byte-identical. Persists (unlike a toast) so the "these are old results" cue stays visible while
+    /// browsing; degrade cases (targets/format changed) surface as a transient toast instead.
+    /// </summary>
+    public string? RestoreNotice { get; init; }
+
     /// <summary>Transient one-line toast; auto-cleared ~3s after it appears (M6).</summary>
     public string? Toast { get; init; }
     /// <summary>Monotonic id so a stale <see cref="AppEvent.ToastExpired"/> can't clear a newer toast.</summary>

@@ -35,7 +35,23 @@ public static class Glyphs
         if (node.BuildPhase == BuildPhase.Failed) return (Failed, Ansi.Red);
         if (node.Notice is { Severity: NoticeSeverity.Error }) return (Error, Ansi.Red);
         if (node.Notice is { Severity: NoticeSeverity.Warning }) return (Warning, Ansi.Yellow);
-        return node.IsLeaf ? ForLeaf(node.Status, tick) : ForBranch(node, tick);
+        var (glyph, color) = node.IsLeaf ? ForLeaf(node.Status, tick) : ForBranch(node, tick);
+        if (color != Ansi.Grey && IsStaleForDisplay(node)) color = Ansi.Grey;
+        return (glyph, color);
+    }
+
+    /// <summary>
+    /// Staleness overlay (plan §10/§11.2): keep the ✓/✗ shape but dim its colour. A leaf dims when its own
+    /// result is stale; a branch dims only when EVERY resulted leaf under it is stale and nothing is
+    /// (re)running — so a branch with a fresh failure among stale siblings still shows red, not grey.
+    /// </summary>
+    private static bool IsStaleForDisplay(TestNode node)
+    {
+        if (node.StaleLeaves == 0) return false;
+        if (node.IsLeaf) return true;
+        if (node.AnyRunning || node.Queued > 0) return false;
+        var resulted = node.Passed + node.Failed + node.Skipped;   // stale leaves keep their underlying status
+        return resulted > 0 && node.StaleLeaves == resulted;
     }
 
     /// <summary>The glyph (1 cell) + colour for a leaf status. Running/Queued animate via <paramref name="tick"/>.</summary>

@@ -1,0 +1,16 @@
+﻿ttr · Sample.slnx · 5 tests · 3✓ 1✗ 1⊘ · 0ms · restored 5 results from 3 min ag…
+✗ Sample.slnx                  1✗ 3✓ 1⊘    19ms│Detail · Subtract_ReturnsDiffer…
+  ✗ Sample.Tests               1✗ 3✓ 1⊘    19ms│Subtract_ReturnsDifference      
+    ✗ Sample                   1✗ 3✓ 1⊘    19ms│Status: Failed    Duration: 9ms 
+      ✗ CalculatorTests           1✗ 2✓    16ms│                                
+        ✓ Add_ReturnsS…                     4ms│Message:                        
+        ✗ Subtract_Ret…                     9ms│  Assert.Equal() Failure: Value…
+        ✓ Divide_Retur…                     3ms│  Expected: 42                  
+      ✓ StringTests               1✓ 1⊘     3ms│  Actual:   41                  
+        ✓ Trim_Removes…                     2ms│                                
+        ⊘ Upper_IsSkip…                     1ms│Exception:                      
+                                               │  Xunit.Sdk.EqualException      
+                                               │                                
+                                               │Stack trace:                    
+                                               │   at Sample.CalculatorTests.Su…
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rer…

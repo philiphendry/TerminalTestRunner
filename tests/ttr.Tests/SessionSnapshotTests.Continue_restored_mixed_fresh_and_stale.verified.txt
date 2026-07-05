@@ -1,0 +1,20 @@
+﻿ttr · Sample.slnx · 5 tests · 3✓ 1✗ 1⊘ · 0ms · restored 5 results from 3 min ago · [ts]                  fps 0 · p95 0ms
+✗ Sample.slnx                                          1✗ 3✓ 1⊘    19ms│Detail · Subtract_ReturnsDifference             
+  ✗ Sample.Tests                                       1✗ 3✓ 1⊘    19ms│Subtract_ReturnsDifference                      
+    ✗ Sample                                           1✗ 3✓ 1⊘    19ms│Status: Failed    Duration: 9ms                 
+      ✗ CalculatorTests                                   1✗ 2✓    16ms│                                                
+        ✓ Add_ReturnsSum                                            4ms│Message:                                        
+        ✗ Subtract_ReturnsDifference                                9ms│  Assert.Equal() Failure: Values differ         
+        ✓ Divide_ReturnsQuotient                                    3ms│  Expected: 42                                  
+      ✓ StringTests                                       1✓ 1⊘     3ms│  Actual:   41                                  
+        ✓ Trim_RemovesWhitespace                                    2ms│                                                
+        ⊘ Upper_IsSkipped                                           1ms│Exception:                                      
+                                                                       │  Xunit.Sdk.EqualException                      
+                                                                       │                                                
+                                                                       │Stack trace:                                    
+                                                                       │   at Sample.CalculatorTests.Subtract_ReturnsDi…
+                                                                       │   at Sample.CalculatorTests.<Subtract_ReturnsD…
+                                                                       │   at System.RuntimeMethodHandle.InvokeMethod(O…
+                                                                       │                                                
+                                                                       │Output:                                         
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab focus · ? help · q qui…

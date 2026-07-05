@@ -90,6 +90,25 @@ public sealed class TestNode
     /// </summary>
     public bool PendingRemoval { get; set; }
 
+    /// <summary>
+    /// Staleness overlay (Phase 6, plan §10/§11.2): a result (Passed/Failed/Skipped) whose binary has since
+    /// changed — a restored <c>--continue</c> result whose assembly is newer than it, or a kept result whose
+    /// project a watch/rerun just rebuilt. It renders as the SAME ✓/✗ glyph dimmed (staleness is orthogonal to
+    /// the outcome, so pass and fail both dim), and any real run clears it. Tracked as a subtree counter
+    /// propagated like <see cref="Counts"/> (a leaf's own value is 0 or 1) so a branch can dim its rollup too.
+    /// </summary>
+    public int StaleLeaves { get; set; }
+
+    /// <summary>True for a leaf whose own result is stale (<see cref="StaleLeaves"/> counts the subtree).</summary>
+    public bool IsStale => IsLeaf && StaleLeaves > 0;
+
+    /// <summary>
+    /// A restored (<c>--continue</c>) leaf whose rich detail lives on disk (results/&lt;runId&gt;/details.jsonl)
+    /// and has not been lazily loaded yet (brief M5). <see cref="Detail"/> stays null until the detail pane / 'o'
+    /// asks for it; loading it (or any real run) clears this flag. Never preloaded (POC-8 bar).
+    /// </summary>
+    public bool HasRestoredDetail { get; set; }
+
     /// <summary>Per-status leaf counts of this subtree (index by <see cref="TestStatus"/>).</summary>
     public int[] Counts { get; } = new int[7];
 

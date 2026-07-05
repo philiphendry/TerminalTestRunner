@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Ttr.Cli.Watch;
 using Ttr.Core;
+using Ttr.Core.Persistence;
 using Ttr.Runners;
 using Ttr.Ui;
 
@@ -43,30 +44,52 @@ public static class App
         return RunLoop(initial, adapter, (writer, state, ct) => FakeWatchDemo.RunAsync(adapter, target, writer, state, ct));
     }
 
+    /// <summary>The <c>--fake --continue</c> demo (brief M1): a scripted restore over a small registered
+    /// project — the tree arrives with restored pass/fail results (a few already Stale) and pre-applied UI
+    /// state, then a simulated rebuild flips a subtree to Stale. Every state is a real reducer state, so the
+    /// demo and the M1 snapshots agree. No disk is touched (the "restore" is scripted, not loaded).</summary>
+    public static int RunFakeContinue()
+    {
+        var initial = AppState.Initial("Sample.slnx", runsEnabled: true, rootName: "Sample.slnx");
+        var target = new TestTarget("Sample.slnx");
+        return RunLoop(initial, adapter: null,
+            (writer, state, ct) => FakeContinueDemo.RunAsync(writer, state, ct));
+    }
+
     /// <summary>Real session: evaluate/build/discover the resolved targets, then run them on demand (Phase 4)
     /// and — when <paramref name="watch"/> is set — react to source (or external-build) changes (Phase 5).
-    /// The backend is BOTH the initial discovery producer and the run adapter; <paramref name="watchFactory"/>
-    /// (when non-null) builds the watch coordinator once the channel + reducer loop exist.</summary>
+    /// The backend is BOTH the initial discovery producer and the run adapter; <paramref name="store"/> (when
+    /// non-null) persists after every run + on exit and serves lazy restored details; <paramref name="afterDiscovery"/>
+    /// applies a restore / degrade toast once the tree is populated; <paramref name="watchFactory"/> builds the
+    /// watch coordinator once the channel + reducer loop exist.</summary>
     public static int RunReal(
-        RealBackend backend, string title, WatchKind watch = WatchKind.Off,
+        RealBackend backend, string title, SessionStore? store = null,
+        Func<ChannelWriter<AppEvent>, Task>? afterDiscovery = null, WatchKind watch = WatchKind.Off,
         Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator>? watchFactory = null)
     {
         var initial = AppState.Initial(title, runsEnabled: true, rootName: title) with { Watch = watch };
         var target = new TestTarget(title);
         return RunLoop(initial, adapter: backend,
-            (writer, _, ct) => backend.DiscoverAsync(target, writer, ct), watchFactory);
+            async (writer, _, ct) =>
+            {
+                await backend.DiscoverAsync(target, writer, ct).ConfigureAwait(false);
+                if (afterDiscovery is not null) await afterDiscovery(writer).ConfigureAwait(false);
+            },
+            watchFactory, store);
     }
 
     private static int RunLoop(
         AppState initial, ITestSessionAdapter? adapter,
         Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, Task> produce,
-        Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator>? watchFactory = null)
-        => RunLoopAsync(initial, adapter, produce, watchFactory).GetAwaiter().GetResult();
+        Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator>? watchFactory = null,
+        SessionStore? store = null)
+        => RunLoopAsync(initial, adapter, produce, watchFactory, store).GetAwaiter().GetResult();
 
     private static async Task<int> RunLoopAsync(
         AppState initial, ITestSessionAdapter? adapter,
         Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, Task> produce,
-        Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator>? watchFactory)
+        Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator>? watchFactory,
+        SessionStore? store)
     {
         // Ctrl+C is delivered to the input thread as a key (reducer → exit 130) instead of the
         // runtime killing us before the terminal is restored.
@@ -81,7 +104,7 @@ public static class App
 
         // The orchestrator launches side effects (reruns, 'o' highlighting, toast expiry) in reaction
         // to reducer-produced state; the reducer loop invokes it after each change (plan invariant 1).
-        var orchestrator = new Orchestrator(adapter, channel.Writer, cts.Token);
+        var orchestrator = new Orchestrator(adapter, channel.Writer, cts.Token, store: store);
         var loop = new ReducerLoop(initial, orchestrator.OnReduced);
 
         // CLAUDE.md invariant 4: enable Windows VT processing BEFORE any ANSI byte is written; on a legacy
@@ -145,6 +168,12 @@ public static class App
         if (adapter is not null) await adapter.DisposeAsync();
 
         var final = loop.Current;
+        // Save on clean exit (brief M3): persist the final tree + UI so the next --continue restores it. Best
+        // effort — a save failure must never change the exit code. (A mid-run crash keeps the last saved run.)
+        if (store is not null)
+            try { store.Save(SessionSnapshot.Capture(final)); }
+            catch (Exception ex) { Console.Error.WriteLine($"warning: could not save session: {ex.Message}"); }
+
         if (final.FatalMessage is { } msg)
             Console.Error.WriteLine(msg);
         return final.ExitCode;

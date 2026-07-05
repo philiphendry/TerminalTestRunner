@@ -134,6 +134,27 @@ internal static partial class TestKit
         return Reducer.Reduce(s, new AppEvent.RunCompleted());
     }
 
+    // --- Sessions / --continue (Phase 6, brief M1) ------------------------------
+
+    /// <summary>The <c>--fake --continue</c> base: the registered project with its tests discovered, before the
+    /// restore attaches results (the snapshot suite drives the restore states from here).</summary>
+    public static AppState ContinueBase()
+    {
+        var s = AppState.Initial("Sample.slnx", runsEnabled: true, rootName: "Sample.slnx");
+        s = Reducer.Reduce(s, FakeContinueScript.ProjectRegistered);
+        return Reducer.Reduce(s, new AppEvent.TestsDiscovered(FakeContinueScript.Initial));
+    }
+
+    /// <summary>The base after a scripted restore: mixed fresh/Stale results, pre-applied UI, and the failure's
+    /// detail lazily loaded (so the detail pane has content) — the state AC1/AC2's fake demo shows.</summary>
+    public static AppState ContinueRestored()
+    {
+        var s = ContinueBase();
+        s = Reducer.Reduce(s, new AppEvent.SessionRestored(
+            FakeContinueScript.RestoredResults, FakeContinueScript.RestoredUiState, FakeContinueScript.RelativeTime));
+        return Reducer.Reduce(s, new AppEvent.DetailLoaded(FakeContinueScript.Subtract.Id, FakeContinueScript.SubtractDetail));
+    }
+
     /// <summary>Move the selection onto the first visible row whose node name equals <paramref name="name"/>.</summary>
     public static AppState SelectByName(AppState s, string name)
     {

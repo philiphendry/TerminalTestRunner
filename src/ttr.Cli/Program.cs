@@ -1,6 +1,10 @@
 using Microsoft.Build.Locator;
 using Ttr.Cli;
 
+// Test-only crash-safety harness (brief M6): if TTR_CRASH_SAVE_DIR is set, loop-save forever so a parent test
+// can SIGKILL mid-write. Checked first (references no Microsoft.Build type) and never returns until killed.
+if (SessionCrashHarness.TryRun()) return 0;
+
 // CLAUDE.md build rule / plan §7: MSBuildLocator.RegisterDefaults() binds the tool to the host SDK's
 // real MSBuild and MUST run in a method that references ZERO Microsoft.Build types — the JIT resolves
 // a method's referenced types before its first line executes, so any Microsoft.Build use here would

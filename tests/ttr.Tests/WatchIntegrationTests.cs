@@ -10,7 +10,11 @@ namespace Ttr.Tests;
 /// These are timing-based (inotify delivery + debounce), so they poll with generous windows; they create
 /// their own temp trees and need no built fixture.
 /// </summary>
-[Collection("watch-fs")]
+// Serialised with the other timing-sensitive / load-heavy suites (MTP runs, the Phase 6 perf + kill -9
+// harnesses) via the shared "integration" collection — concurrent CPU/IO load makes inotify-debounce and
+// millisecond bars flake, so they must not run in parallel with each other (they still parallelise with the
+// pure unit suites, which carry no timing assertions).
+[Collection("integration")]
 public class WatchIntegrationTests
 {
     private const int DebounceMs = 200;
