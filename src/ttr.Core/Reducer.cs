@@ -50,7 +50,10 @@ public static class Reducer
         var expanded = s.Expanded.ToBuilder();
         var structural = false;
         foreach (var id in d.Tests)
-            EnsureLeaf(s.Root, id, expanded, ref structural);
+        {
+            var leaf = EnsureLeaf(s.Root, id, expanded, ref structural);
+            AttachSourceLocation(leaf, id);
+        }
 
         var selection = s.Selection ?? s.Root.Id;
         var next = s with
@@ -650,7 +653,10 @@ public static class Reducer
         var method = EnsureBranch(cls, id.Method, TestNodeKind.Method,
             TestCaseId.ForBranch(TestNodeKind.Method, id.Project, id.Tfm, id.Namespace, id.ClassName, id.Method),
             id.Method, expanded, ref structural);
-        return EnsureLeafNode(method, id.CaseDisplay!, TestNodeKind.Case, id.Id, id.CaseDisplay!, ref structural);
+        // Key the Case leaf on the derived id (CLAUDE.md invariant 7), not the display: some frameworks
+        // (xUnit v3 at MTP discovery) give data rows an identical display-name, and keying on that would
+        // collapse distinct rows into one node. The display stays the human label.
+        return EnsureLeafNode(method, id.Id.Value, TestNodeKind.Case, id.Id, id.CaseDisplay!, ref structural);
     }
 
     private static TestNode EnsureBranch(
@@ -716,6 +722,14 @@ public static class Reducer
         leaf.FileRefs = detail is null || detail.IsEmpty
             ? []
             : TtrParser.FileReferenceParser.Parse(detail.Message, detail.StackTrace, projectDir: "");
+    }
+
+    /// <summary>MTP discovery carries a structured source location (plan §6.4/§11.5). Use it as the leaf's
+    /// default 'o' target — set only when the leaf has no failure-derived refs yet (Phase 4 detail wins).</summary>
+    private static void AttachSourceLocation(TestNode leaf, TestIdentity id)
+    {
+        if (id.SourceFile is not { Length: > 0 } file || leaf.FileRefs.Count > 0) return;
+        leaf.FileRefs = [new FileRef(file, id.SourceLine, SourceKind.StackFrame, File.Exists(file))];
     }
 
     private static void SetDuration(TestNode leaf, TimeSpan duration)

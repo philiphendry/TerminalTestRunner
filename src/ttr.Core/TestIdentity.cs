@@ -14,7 +14,9 @@ public sealed record TestIdentity(
     string Namespace,
     string ClassName,
     string Method,
-    string? CaseDisplay = null)
+    string? CaseDisplay = null,
+    string? SourceFile = null,
+    int? SourceLine = null)
 {
     /// <summary>Human-facing label for the leaf node.</summary>
     public string LeafLabel => CaseDisplay ?? Method;

@@ -127,30 +127,11 @@ public static class MtpDiscoverer
         var handler = new HeaderDelimitedMessageHandler(stream, stream, new SystemTextJsonFormatter());
         using var rpc = new JsonRpc(handler);
 
-        var discovered = 0;
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var batch = new List<TestIdentity>();
-
-        // The host streams test-node updates here; changes:null is the completion sentinel (primary).
-        rpc.AddLocalRpcMethod("testing/testUpdates/tests", (JsonElement args) =>
-        {
-            if (!args.TryGetProperty("changes", out var changes) || changes.ValueKind == JsonValueKind.Null)
-            {
-                if (batch.Count > 0) { events.TryWrite(new AppEvent.TestsDiscovered([.. batch])); batch.Clear(); }
-                completion.TrySetResult();   // sentinel
-                return;
-            }
-            if (changes.ValueKind != JsonValueKind.Array) return;
-            foreach (var change in changes.EnumerateArray())
-            {
-                var identity = MapNode(change, projectPath, tfm);
-                if (identity is null) continue;
-                batch.Add(identity);
-                discovered++;
-            }
-            if (batch.Count >= 200) { events.TryWrite(new AppEvent.TestsDiscovered([.. batch])); batch.Clear(); }
-        });
-
+        // MTP notification params are ONE named object, so the sink methods use
+        // UseSingleObjectParameterDeserialization; the no-op sinks for client/log + telemetry/update
+        // absorb the tolerated unknown notifications (§6.4) so StreamJsonRpc logs no warnings.
+        var sink = new NotificationSink(projectPath, tfm, events);
+        rpc.AddLocalRpcTarget(sink, new JsonRpcTargetOptions { AllowNonPublicInvocation = true });
         rpc.StartListening();
 
         // initialize — capture serverInfo.version, warn on a major-version jump outside the tested range.
@@ -169,34 +150,102 @@ public static class MtpDiscoverer
         }, ct);
 
         // Sentinel is primary completion; the response is secondary. Whichever lands first ends the wait.
-        await Task.WhenAny(completion.Task, discoverTask).ConfigureAwait(false);
+        await Task.WhenAny(sink.Completion, discoverTask).ConfigureAwait(false);
         try { await discoverTask.ConfigureAwait(false); } catch (RemoteInvocationException) { }
-
-        if (batch.Count > 0) events.TryWrite(new AppEvent.TestsDiscovered([.. batch]));
+        sink.Flush();
 
         try { await rpc.NotifyAsync("exit").ConfigureAwait(false); } catch (Exception) { }
-        return discovered;
+        return sink.Discovered;
     }
 
-    /// <summary>Map one MTP node change to a leaf identity, if it is a test node. Uses the structured
-    /// location for the default 'o' target where present. Best-effort field parsing (tuned in M8).</summary>
-    private static TestIdentity? MapNode(JsonElement change, string projectPath, string tfm)
+    /// <summary>Receives the host's JSON-RPC notifications. Test-node changes stream into
+    /// <see cref="AppEvent.TestsDiscovered"/> batches; the <c>changes: null</c> sentinel completes discovery.
+    /// MTP nodes use FLAT dotted keys (<c>display-name</c>, <c>location.file</c>, <c>location.line-start</c>,
+    /// <c>location.type</c>, <c>location.method</c>, <c>node-type</c>, <c>execution-state</c>).</summary>
+    private sealed class NotificationSink(string projectPath, string tfm, ChannelWriter<AppEvent> events)
     {
-        if (!change.TryGetProperty("node", out var node)) return null;
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly List<TestIdentity> _batch = [];
 
-        var uid = GetString(node, "uid");
-        var displayName = GetString(node, "display-name") ?? uid;
-        if (string.IsNullOrEmpty(displayName)) return null;
+        public Task Completion => _completion.Task;
+        public int Discovered { get; private set; }
 
-        // Only surface test nodes (skip group/action nodes without an execution state where identifiable).
-        var nodeType = GetString(node, "node-type");
-        if (nodeType is not null && !nodeType.Contains("test", StringComparison.OrdinalIgnoreCase)
-            && !nodeType.Contains("action", StringComparison.OrdinalIgnoreCase))
-            return null;
+        [JsonRpcMethod("testing/testUpdates/tests", UseSingleObjectParameterDeserialization = true)]
+        public void TestUpdates(JsonElement p)
+        {
+            if (!p.TryGetProperty("changes", out var changes) || changes.ValueKind == JsonValueKind.Null)
+            {
+                Flush();
+                _completion.TrySetResult();   // sentinel (primary completion)
+                return;
+            }
+            if (changes.ValueKind != JsonValueKind.Array) return;
+            foreach (var change in changes.EnumerateArray())
+            {
+                if (MapNode(change) is not { } identity) continue;
+                _batch.Add(identity);
+                Discovered++;
+            }
+            if (_batch.Count >= 200) Flush();
+        }
 
-        var (ns, cls, method) = SplitDisplayName(displayName);
-        var id = TestCaseId.ForCase(AdapterKind, projectPath, tfm, uid ?? displayName, null);
-        return new TestIdentity(id, projectPath, tfm, ns, cls, method);
+        [JsonRpcMethod("client/log", UseSingleObjectParameterDeserialization = true)]
+        public void ClientLog(JsonElement p) { }
+
+        [JsonRpcMethod("telemetry/update", UseSingleObjectParameterDeserialization = true)]
+        public void Telemetry(JsonElement p) { }
+
+        public void Flush()
+        {
+            if (_batch.Count == 0) return;
+            events.TryWrite(new AppEvent.TestsDiscovered([.. _batch]));
+            _batch.Clear();
+        }
+
+        private TestIdentity? MapNode(JsonElement change)
+        {
+            if (!change.TryGetProperty("node", out var node)) return null;
+
+            var displayName = GetString(node, "display-name") ?? GetString(node, "uid");
+            if (string.IsNullOrEmpty(displayName)) return null;
+
+            // Only surface leaf test nodes; group/container nodes are skipped.
+            var nodeType = GetString(node, "node-type");
+            if (nodeType is not null
+                && !nodeType.Contains("test", StringComparison.OrdinalIgnoreCase)
+                && !nodeType.Contains("action", StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            // Prefer the structured location.type/location.method; fall back to splitting display-name.
+            var typeName = GetString(node, "location.type");
+            var methodName = GetString(node, "location.method");
+            string ns, cls, method;
+            if (typeName is not null && methodName is not null)
+            {
+                var typeDot = typeName.LastIndexOf('.');
+                ns = typeDot < 0 ? "" : typeName[..typeDot];
+                cls = typeDot < 0 ? typeName : typeName[(typeDot + 1)..];
+                method = methodName;
+            }
+            else
+            {
+                (ns, cls, method) = SplitDisplayName(displayName);
+            }
+
+            // A theory/data row: display-name carries the row after "type.method" — use it as the case label.
+            string? caseDisplay = null;
+            var prefix = $"{typeName}.{methodName}";
+            if (typeName is not null && methodName is not null
+                && displayName.StartsWith(prefix, StringComparison.Ordinal)
+                && displayName.Length > prefix.Length)
+                caseDisplay = displayName[prefix.Length..].Trim();
+
+            var uid = GetString(node, "uid") ?? displayName;
+            var id = TestCaseId.ForCase(AdapterKind, projectPath, tfm, uid, caseDisplay);
+            var file = GetString(node, "location.file");
+            var line = GetInt(node, "location.line-start");
+            return new TestIdentity(id, projectPath, tfm, ns, cls, method, caseDisplay, file, line);
+        }
     }
 
     /// <summary>Split a dotted display name into ns/class/method; falls back to a flat method name.</summary>
@@ -209,6 +258,9 @@ public static class MtpDiscoverer
         var typeDot = type.LastIndexOf('.');
         return typeDot < 0 ? ("", type, method) : (type[..typeDot], type[(typeDot + 1)..], method);
     }
+
+    private static int? GetInt(JsonElement e, string prop) =>
+        e.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
 
     private static void WarnOnVersion(
         JsonElement initResult, string projectPath, string? tfm, ChannelWriter<AppEvent> events)
