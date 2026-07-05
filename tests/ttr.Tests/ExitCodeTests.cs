@@ -23,15 +23,15 @@ public class ExitCodeTests
 
     [Fact]
     public void Clean_all_pass_exits_0() =>
-        Assert.Equal(0, Reducer.Reduce(WithOneLeaf(TestOutcome.Passed), Q).ExitCode);
+        Assert.Equal(0, Press(WithOneLeaf(TestOutcome.Passed), Q).ExitCode);
 
     [Fact]
     public void Failing_tests_exit_1() =>
-        Assert.Equal(1, Reducer.Reduce(WithOneLeaf(TestOutcome.Failed), Q).ExitCode);
+        Assert.Equal(1, Press(WithOneLeaf(TestOutcome.Failed), Q).ExitCode);
 
     [Fact]
     public void CtrlC_exits_130() =>
-        Assert.Equal(130, Reducer.Reduce(WithOneLeaf(TestOutcome.Passed), CtrlC).ExitCode);
+        Assert.Equal(130, Press(WithOneLeaf(TestOutcome.Passed), CtrlC).ExitCode);
 
     [Fact]
     public void Build_failure_preventing_any_run_exits_3()
@@ -44,7 +44,7 @@ public class ExitCodeTests
             new AppEvent.BuildStarted(proj),
             new AppEvent.BuildFailed(proj, [], "P.csproj(1,1): error CS0000: boom"));
         Assert.Equal(0, s.Passed + s.Failed + s.Skipped);   // nothing ran
-        Assert.Equal(3, Reducer.Reduce(s, Q).ExitCode);
+        Assert.Equal(3, Press(s, Q).ExitCode);
     }
 
     [Fact]
@@ -57,6 +57,6 @@ public class ExitCodeTests
         s = Feed(s,
             new AppEvent.ProjectRegistered(proj, "Broken", ["net10.0"], RunnerKind.VsTest),
             new AppEvent.BuildFailed(proj, [], "boom"));
-        Assert.Equal(0, Reducer.Reduce(s, Q).ExitCode);
+        Assert.Equal(0, Press(s, Q).ExitCode);
     }
 }
