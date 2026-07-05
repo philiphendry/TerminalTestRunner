@@ -9,6 +9,14 @@
     <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
   </ItemGroup>
 
+  <!-- Phase 3 real adapters (plan §6.3/§6.4). VSTest via the translation layer (talks to the SDK's
+       vstest.console); MTP via StreamJsonRpc server mode. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.TestPlatform.TranslationLayer" />
+    <PackageReference Include="Microsoft.TestPlatform.ObjectModel" />
+    <PackageReference Include="StreamJsonRpc" />
+  </ItemGroup>
+
   <!--
     The fake `files` scenario embeds absolute paths to these committed sources into its failure
     stack traces so the 'o' modal has real, existing files to open (plan §6.5 / brief M1). They

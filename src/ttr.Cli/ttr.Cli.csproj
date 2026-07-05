@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" />
+    <!-- Locator registration lives in Program.cs (Main touches no Microsoft.Build type). -->
+    <PackageReference Include="Microsoft.Build.Locator" />
   </ItemGroup>
 
 </Project>

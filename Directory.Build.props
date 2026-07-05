@@ -12,6 +12,17 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <IsPackable>false</IsPackable>
+
+    <!--
+      MSBuildLocator 1.11's MSBL001 analyzer flags Microsoft.NET.StringTools flowing to output. Here it
+      is a genuine TRANSITIVE runtime dependency of Microsoft.TestPlatform.TranslationLayer (§6.3), not
+      of our (ExcludeAssets="runtime") Microsoft.Build.* references. MSBuildLocator's runtime resolver
+      redirects the whole MSBuild assembly family — StringTools included — to the host SDK's copies, so a
+      shipped 18.4.0 is redirected, never loaded, and cannot conflict. The check does not model that, so
+      we disable it (all direct Microsoft.Build.* refs remain ExcludeAssets="runtime" per the CLAUDE.md
+      build rule; recorded in docs/phase-3-notes.md).
+    -->
+    <DisableMSBuildAssemblyCopyCheck>true</DisableMSBuildAssemblyCopyCheck>
   </PropertyGroup>
 
 </Project>

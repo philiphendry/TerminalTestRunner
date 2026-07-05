@@ -21,13 +21,17 @@
     <PackageVersion Include="Microsoft.Build.Locator" Version="1.11.2" />
     <PackageVersion Include="Microsoft.Build" Version="17.14.28" />
     <PackageVersion Include="Microsoft.Build.Framework" Version="17.14.28" />
+    <!-- Transitive MSBuild utility; excluded from runtime + kept private so it never flows to output
+         or to consumers (MSBuildLocator loads the SDK's copy). Version tracks the resolved graph. -->
+    <PackageVersion Include="Microsoft.NET.StringTools" Version="18.4.0" />
     <!-- Solution (.sln/.slnx) parsing, pinned 1.0.52 (plan §4 / POC-7). -->
     <PackageVersion Include="Microsoft.VisualStudio.SolutionPersistence" Version="1.0.52" />
     <!-- VSTest discovery via the translation layer (plan §6.3); talks to the SDK's vstest.console. -->
     <PackageVersion Include="Microsoft.TestPlatform.TranslationLayer" Version="18.7.0" />
     <PackageVersion Include="Microsoft.TestPlatform.ObjectModel" Version="18.7.0" />
-    <!-- MTP server-mode JSON-RPC (plan §6.4). -->
-    <PackageVersion Include="StreamJsonRpc" Version="2.22.23" />
+    <!-- MTP server-mode JSON-RPC (plan §6.4). 2.25.29 pulls the patched MessagePack 2.5.302
+         (2.22's MessagePack 2.5.192 trips NU1902/NU1903). -->
+    <PackageVersion Include="StreamJsonRpc" Version="2.25.29" />
 
     <!-- Test dependencies -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
