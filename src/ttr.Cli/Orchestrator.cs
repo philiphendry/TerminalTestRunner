@@ -12,7 +12,7 @@ namespace Ttr.Cli;
 /// </summary>
 public sealed class Orchestrator
 {
-    private readonly ITestSessionAdapter _adapter;
+    private readonly ITestSessionAdapter? _adapter;
     private readonly TestTarget _target;
     private readonly ChannelWriter<AppEvent> _events;
     private readonly CancellationToken _ct;
@@ -22,10 +22,11 @@ public sealed class Orchestrator
     private string? _lastModalPath;
 
     public Orchestrator(
-        ITestSessionAdapter adapter, TestTarget target, ChannelWriter<AppEvent> events, CancellationToken ct)
+        ITestSessionAdapter? adapter, ChannelWriter<AppEvent> events, CancellationToken ct,
+        TestTarget? target = null)
     {
         _adapter = adapter;
-        _target = target;
+        _target = target ?? new TestTarget("");
         _events = events;
         _ct = ct;
     }
@@ -35,7 +36,7 @@ public sealed class Orchestrator
         if (next.RunGeneration != _lastRunGeneration)
         {
             _lastRunGeneration = next.RunGeneration;
-            Launch(RunEffect(next.RunSubset));
+            if (_adapter is not null) Launch(RunEffect(next.RunSubset));   // real read-only mode has no adapter
         }
 
         if (next.Modal is { } m)
@@ -60,6 +61,7 @@ public sealed class Orchestrator
 
     private async Task RunEffect(IReadOnlyList<TestCaseId> subset)
     {
+        if (_adapter is null) return;
         try { await _adapter.RunAsync(_target, subset, _events, _ct); }
         catch (OperationCanceledException) { /* shutdown */ }
     }

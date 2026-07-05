@@ -1,0 +1,3 @@
+<Project>
+  <!-- Stops the walk-up to the repo's Directory.Build.targets (there is none, but be explicit). -->
+</Project>

@@ -47,9 +47,9 @@ public sealed class CliOptions
     /// <see cref="OptionResult.Implicit"/> being false.
     /// </summary>
     public bool AnyReserved(ParseResult pr) =>
-        IsSupplied(pr, Continue) || IsSupplied(pr, Watch) || IsSupplied(pr, NoBuild)
-        || IsSupplied(pr, Tfm) || IsSupplied(pr, StateDir) || IsSupplied(pr, Log);
+        IsSupplied(pr, Continue) || IsSupplied(pr, Watch)
+        || IsSupplied(pr, Tfm) || IsSupplied(pr, StateDir);
 
-    private static bool IsSupplied(ParseResult pr, Option option) =>
+    public bool IsSupplied(ParseResult pr, Option option) =>
         pr.GetResult(option) is { Implicit: false };
 }

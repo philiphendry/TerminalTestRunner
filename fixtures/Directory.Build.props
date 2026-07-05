@@ -1,0 +1,6 @@
+<Project>
+  <!-- Fixtures are self-contained sample test projects, deliberately ISOLATED from the repo's
+       Directory.Build.props (net10.0 pin, warnings-as-errors, analyzers) and central package
+       management. This empty root stops the MSBuild walk-up so each fixture pins its own versions
+       inline and can contain deliberately-failing/skipped tests without breaking the ttr build. -->
+</Project>
