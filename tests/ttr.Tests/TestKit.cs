@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Ttr.Core;
+using Ttr.Runners;
 using Ttr.Ui;
 
 namespace Ttr.Tests;
@@ -48,5 +49,47 @@ internal static partial class TestKit
             if (string.IsNullOrEmpty(part)) continue;
             yield return AnsiEscape().Replace(part, string.Empty);
         }
+    }
+
+    // --- Scenario playback + rendering (snapshot suite, brief M7) ---------------
+
+    /// <summary>Deterministically drive a fake scenario through the reducer: discovery, then every
+    /// test Started→Finished (with failure detail), then RunCompleted. No timing, no threads.</summary>
+    public static AppState Play(string scenario, int seed)
+    {
+        var built = ScenarioBuilder.Build(scenario, seed);
+        var s = AppState.Initial(scenario);
+        foreach (var plan in built.Plans.Where(p => p.DiscoverUpfront))
+            s = Reducer.Reduce(s, new AppEvent.TestsDiscovered([plan.Identity]));
+        foreach (var plan in built.Plans)
+        {
+            s = Reducer.Reduce(s, new AppEvent.TestStarted(plan.Identity));
+            s = Reducer.Reduce(s, new AppEvent.TestFinished(plan.Identity, plan.Outcome, plan.Duration, plan.Detail));
+        }
+        return Reducer.Reduce(s, new AppEvent.RunCompleted());
+    }
+
+    /// <summary>Feed a sequence of keystrokes.</summary>
+    public static AppState Press(AppState s, params ConsoleKeyInfo[] keys)
+    {
+        foreach (var k in keys) s = Reducer.Reduce(s, new AppEvent.KeyPressed(k));
+        return s;
+    }
+
+    /// <summary>Render a frame through the in-memory shell at (w,h); returns the ANSI-stripped visible
+    /// grid with machine paths scrubbed, so snapshots are deterministic across machines/OS.</summary>
+    public static string Render(AppState s, int w, int h)
+    {
+        s = Reducer.Reduce(s, new AppEvent.Resized(w, h)); // keep reducer viewport in sync with draw size
+        var shell = new StringUiShell(w, h);
+        shell.Write(FrameBuilder.Build(s, new RenderInfo(0, 0, 0, 0), w, h));
+        var text = string.Join("\n", VisibleRows(shell.LastFrame));
+        return Scrub(text);
+    }
+
+    private static string Scrub(string text)
+    {
+        var baseDir = AppContext.BaseDirectory.TrimEnd('/', '\\');
+        return text.Replace(baseDir, "{BASE}", StringComparison.Ordinal);
     }
 }

@@ -23,3 +23,6 @@ coverage*.json
 ## OS
 .DS_Store
 Thumbs.db
+
+# NuGet repo-local package cache (see NuGet.config)
+.packages/

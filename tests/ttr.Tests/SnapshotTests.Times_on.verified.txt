@@ -1,0 +1,30 @@
+﻿ttr · files · 14 tests · 9✓ 4✗ 1⊘ · 0ms · [t]                                        fps 0 · p95 0ms
+✗ (fake)                                                                            4✗ 9✓ 1⊘   117ms
+  ✗ Contoso.Sample.Tests                                                            4✗ 9✓ 1⊘   117ms
+    ✗ net10.0                                                                       4✗ 9✓ 1⊘   117ms
+      ✗ Contoso.Sample.Calculations                                                 2✗ 6✓ 1⊘    51ms
+        ✗ CalculatorTests                                                              2✗ 5✓    48ms
+          ✗ Add_ReturnsSum                                                                      12ms
+          ✓ Subtract_ReturnsDifference                                                           3ms
+          ✓ Divide_ByZero_Throws                                                                 5ms
+          ✓ Average_Empty_Throws                                                                 4ms
+          ✗ Add_Theory                                                                 1✗ 2✓    24ms
+        ✓ StringUtilitiesTests                                                         1✓ 1⊘     3ms
+          ✓ Format_Trims                                                                         2ms
+          ⊘ Format_Null_IsSkipped                                                                1ms
+      ✗ Contoso.Sample.Networking                                                      2✗ 3✓    66ms
+        ✗ PaymentProcessorTests                                                        1✗ 2✓    40ms
+          ✗ Charge_ValidCard                                                                    24ms
+          ✓ Convert_SameCurrency_Identity                                                        7ms
+          ✓ RiskScore_HighAmount                                                                 9ms
+        ✗ SettlementTests                                                              1✗ 1✓    26ms
+          ✗ Settle_Empty_Throws                                                                 15ms
+          ✓ Settle_GroupsByCurrency                                                             11ms
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

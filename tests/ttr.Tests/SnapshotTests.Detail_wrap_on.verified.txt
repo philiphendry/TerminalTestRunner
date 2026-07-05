@@ -1,0 +1,30 @@
+﻿ttr · crafted · 1 tests · 0✓ 1✗ 0⊘ · running 0 · 0ms · [sw]           
+✗ (fake)                               1✗│Detail · Parses_Nested_Arra…
+  ✗ P                                  1✗│Parses_Nested_Arrays        
+    ✗ net10.0                          1✗│Status: Failed    Duration: 
+      ✗ Contoso.Sample.Parsing         1✗│33ms                        
+        ✗ TokenizerTests               1✗│                            
+          ✗ Parses_Nested_Arrays         │Message:                    
+                                         │  Assert.Equal() Failure: th
+                                         │e parsed token stream did no
+                                         │t match the long expected se
+                                         │quence produced by the refer
+                                         │ence tokenizer implementatio
+                                         │n                           
+                                         │                            
+                                         │Exception:                  
+                                         │  Xunit.Sdk.EqualException  
+                                         │                            
+                                         │Stack trace:                
+                                         │   at Contoso.Sample.Parsing
+                                         │.Tokenizer.Next() in /work/s
+                                         │rc/Parsing/Tokenizer.cs:line
+                                         │ 128                        
+                                         │   at Contoso.Sample.Parsing
+                                         │.TokenizerTests.Parses_Neste
+                                         │d_Arrays() in /work/src/Pars
+                                         │ing/TokenizerTests.cs:line 4
+                                         │2                           
+                                         │                            
+                                         │Output:                     
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times…

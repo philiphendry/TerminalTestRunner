@@ -1,0 +1,20 @@
+﻿ttr · files · 11 tests · 0✓ 0✗ 0⊘ · running 3 · 0ms                                                      fps 0 · p95 0ms
+⠋ (fake)                                                                                                              3◍
+  ⠋ Contoso.Sample.Tests                                                                                              3◍
+    ⠋ net10.0                                                                                                         3◍
+      ⠋ Contoso.Sample.Calculations                                                                                   3◍
+        ⠋ CalculatorTests                                                                                             3◍
+          ⠋ Add_ReturnsSum                                                                                              
+          ⠋ Subtract_ReturnsDifference                                                                                  
+          ⠋ Divide_ByZero_Throws                                                                                        
+          ○ Average_Empty_Throws                                                                                        
+        ○ StringUtilitiesTests                                                                                        2○
+          ○ Format_Trims                                                                                                
+          ○ Format_Null_IsSkipped                                                                                       
+      ○ Contoso.Sample.Networking                                                                                     5○
+        ○ PaymentProcessorTests                                                                                       3○
+          ○ Charge_ValidCard                                                                                            
+          ○ Convert_SameCurrency_Identity                                                                               
+          ○ RiskScore_HighAmount                                                                                        
+        ○ SettlementTests                                                                                             2○
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab focus · ? help · q quit

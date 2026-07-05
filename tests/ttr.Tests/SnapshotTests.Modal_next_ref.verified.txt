@@ -1,0 +1,29 @@
+﻿
+  ┌─ StringUtilities.cs  (2/3)  :line 12 ────────────────────────────────────────────────────────┐
+  │  1 using System;                                                                             │
+  │  2 using System.Globalization;                                                               │
+  │  3                                                                                           │
+  │  4 namespace Contoso.Sample.Calculations;                                                    │
+  │  5                                                                                           │
+  │  6 /// <summary>Second source file, referenced by a helper frame in a fabricated stack trace │
+  │  7 public static class StringUtilities                                                       │
+  │  8 {                                                                                         │
+  │  9     public static string Format(string s)                                                 │
+  │ 10     {                                                                                     │
+  │ 11         ArgumentNullException.ThrowIfNull(s);                                             │
+  │ 12         return s.Trim().ToUpper(CultureInfo.InvariantCulture);   // line 12 — referenced f│
+  │ 13     }                                                                                     │
+  │ 14                                                                                           │
+  │ 15     public static bool IsBlank(string? s) => string.IsNullOrWhiteSpace(s);                │
+  │ 16                                                                                           │
+  │ 17     public static string Truncate(string s, int max) =>                                   │
+  │ 18         s.Length <= max ? s : s[..Math.Max(0, max - 1)] + "…";                            │
+  │ 19 }                                                                                         │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  └─ c/Esc close · n/p file · w wrap · ↑↓ PgUp/PgDn scroll ──────────────────────────────────────┘

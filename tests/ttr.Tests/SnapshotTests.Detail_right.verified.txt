@@ -1,0 +1,30 @@
+﻿ttr · files · 14 tests · 9✓ 4✗ 1⊘ · [s]                                              fps 0 · p95 0ms
+✗ (fake)                                           4✗ 9✓ 1⊘│Detail · Add_ReturnsSum                 
+  ✗ Contoso.Sample.Tests                           4✗ 9✓ 1⊘│Add_ReturnsSum                          
+    ✗ net10.0                                      4✗ 9✓ 1⊘│Status: Failed    Duration: 12ms        
+      ✗ Contoso.Sample.Calculations                2✗ 6✓ 1⊘│                                        
+        ✗ CalculatorTests                             2✗ 5✓│Message:                                
+          ✗ Add_ReturnsSum                                 │  Assert.Equal() Failure: Values differ 
+          ✓ Subtract_ReturnsDifference                     │  Expected: 42                          
+          ✓ Divide_ByZero_Throws                           │  Actual:   41                          
+          ✓ Average_Empty_Throws                           │                                        
+          ✗ Add_Theory                                1✗ 2✓│Exception:                              
+        ✓ StringUtilitiesTests                        1✓ 1⊘│  Xunit.Sdk.EqualException              
+          ✓ Format_Trims                                   │                                        
+          ⊘ Format_Null_IsSkipped                          │Stack trace:                            
+      ✗ Contoso.Sample.Networking                     2✗ 3✓│   at Contoso.Sample.Calculations.Calcu…
+        ✗ PaymentProcessorTests                       1✗ 2✓│   at Contoso.Sample.Calculations.Strin…
+          ✗ Charge_ValidCard                               │   at Contoso.Sample.Generated.Glue.Inv…
+          ✓ Convert_SameCurrency_Identity                  │   at Microsoft.Testing.Framework.Runne…
+          ✓ RiskScore_HighAmount                           │                                        
+        ✗ SettlementTests                             1✗ 1✓│Output:                                 
+          ✗ Settle_Empty_Throws                            │  [stdout] computing sum of 20 + 22     
+          ✓ Settle_GroupsByCurrency                        │  [stdout] returned 41                  
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

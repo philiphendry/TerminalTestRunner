@@ -1,0 +1,30 @@
+﻿ttr · files · 14 tests · 9✓ 4✗ 1⊘                                                    fps 0 · p95 0ms
+✗ (fake)                                                                                    4✗ 9✓ 1⊘
+  ✗ Contoso.Sample.Tests                                                                    4✗ 9✓ 1⊘
+    ✗ net10.0                                                                               4✗ 9✓ 1⊘
+      ✗ Contoso.Sample.Calculations                                                         2✗ 6✓ 1⊘
+        ✗ CalculatorTests                                                                      2✗ 5✓
+          ✗ Add_ReturnsSum                                                                          
+          ✓ Subtract_ReturnsDifference                                                              
+          ✓ Divide_ByZero_Throws                                                                    
+          ✓ Average_Empty_Throws                                                                    
+          ✗ Add_Theory                                                                         1✗ 2✓
+        ✓ StringUtilitiesTests                                                                 1✓ 1⊘
+          ✓ Format_Trims                                                                            
+          ⊘ Format_Null_IsSkipped                                                                   
+      ✗ Contoso.Sample.Networking                                                              2✗ 3✓
+        ✗ PaymentProcessorTests                                                                1✗ 2✓
+          ✗ Charge_ValidCard                                                                        
+          ✓ Convert_SameCurrency_Identity                                                           
+          ✓ RiskScore_HighAmount                                                                    
+        ✗ SettlementTests                                                                      1✗ 1✓
+          ✗ Settle_Empty_Throws                                                                     
+          ✓ Settle_GroupsByCurrency                                                                 
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

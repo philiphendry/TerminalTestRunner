@@ -1,0 +1,29 @@
+﻿
+  ┌─ ttr — keymap (§11.3) ───────────────────────────────────────────────────────────────────────┐
+  │ ↑/↓  j/k                  Move selection                                                     │
+  │ →/←                       Expand / collapse (← on leaf → parent)                             │
+  │ PgUp/PgDn  Home/End       Page / jump (tree or focused detail)                               │
+  │ e                         Toggle expand/collapse of node                                     │
+  │ E  (Shift+E)              Toggle node AND all descendants                                    │
+  │ f                         Toggle failed-only filter                                          │
+  │ s                         Toggle detail pane                                                 │
+  │ b                         Detail pane right ↔ beneath                                        │
+  │ w                         Toggle word wrap (detail / modal)                                  │
+  │ t                         Toggle durations                                                   │
+  │ r                         Rerun tests under selected node                                    │
+  │ R  (Shift+R)              Rerun all                                                          │
+  │ o                         Open file reference in modal                                       │
+  │ Tab                       Cycle focus tree ↔ detail                                          │
+  │ ?                         This help overlay                                                  │
+  │ q / Ctrl+C                Quit                                                               │
+  │                                                                                              │
+  │ Modal:                    c/Esc close · n/p next/prev · w wrap · ↑↓/PgUp/PgDn scroll         │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  │                                                                                              │
+  └─ press any key to close ─────────────────────────────────────────────────────────────────────┘

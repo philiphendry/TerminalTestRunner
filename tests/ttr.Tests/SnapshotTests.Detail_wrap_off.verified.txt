@@ -1,0 +1,30 @@
+﻿ttr · crafted · 1 tests · 0✓ 1✗ 0⊘ · running 0 · 0ms · [s]            
+✗ (fake)                               1✗│Detail · Parses_Nested_Arra…
+  ✗ P                                  1✗│Parses_Nested_Arrays        
+    ✗ net10.0                          1✗│Status: Failed    Duration:…
+      ✗ Contoso.Sample.Parsing         1✗│                            
+        ✗ TokenizerTests               1✗│Message:                    
+          ✗ Parses_Nested_Arrays         │  Assert.Equal() Failure: t…
+                                         │                            
+                                         │Exception:                  
+                                         │  Xunit.Sdk.EqualException  
+                                         │                            
+                                         │Stack trace:                
+                                         │   at Contoso.Sample.Parsin…
+                                         │   at Contoso.Sample.Parsin…
+                                         │                            
+                                         │Output:                     
+                                         │  [info] tokenizing 4096 by…
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+                                         │                            
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times…
