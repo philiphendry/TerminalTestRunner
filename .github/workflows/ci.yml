@@ -28,5 +28,13 @@ jobs:
       - name: Build
         run: dotnet build ttr.sln --configuration Release --no-restore
 
+      # Build the fixture matrix (standalone sample projects, isolated from the repo's CPM) so the
+      # M8 integration tests discover them for real rather than skipping (Win/macOS lanes: Phase 4).
+      - name: Build fixture matrix
+        run: |
+          for p in fixtures/matrix/XunitV2.Tests fixtures/matrix/XunitV3.Tests fixtures/matrix/NUnit4Broken.Tests; do
+            dotnet build "$p" --configuration Debug
+          done
+
       - name: Test
         run: dotnet test ttr.sln --configuration Release --no-build --verbosity normal

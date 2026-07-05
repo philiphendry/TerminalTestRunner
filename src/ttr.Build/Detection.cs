@@ -33,8 +33,8 @@ public static class Detection
 
     /// <summary>Raw MTP opt-in property names — set true here despite IsTestingPlatformApplication=false is dead.</summary>
     private static readonly string[] MtpOptInFlags =
-        ["UseMicrosoftTestingPlatformRunner", "EnableMSTestRunner", "EnableNUnitRunner",
-         "TestingPlatformDotnetTestSupport"];
+        ["UseMicrosoftTestingPlatformRunner", "EnableMicrosoftTestingPlatformRunner",
+         "EnableMSTestRunner", "EnableNUnitRunner", "TestingPlatformDotnetTestSupport"];
 
     public static DetectionResult Detect(EvalSignals s, RunnerKind? configOverride = null)
     {

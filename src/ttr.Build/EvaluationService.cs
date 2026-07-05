@@ -41,8 +41,8 @@ public sealed record TfmEvaluation(
 public sealed class EvaluationService
 {
     private static readonly string[] TrackedOptIns =
-        ["UseMicrosoftTestingPlatformRunner", "EnableMSTestRunner", "EnableNUnitRunner",
-         "TestingPlatformDotnetTestSupport"];
+        ["UseMicrosoftTestingPlatformRunner", "EnableMicrosoftTestingPlatformRunner",
+         "EnableMSTestRunner", "EnableNUnitRunner", "TestingPlatformDotnetTestSupport"];
 
     /// <summary>Evaluate one project across all its target frameworks. <paramref name="configOverride"/> is the
     /// per-project runner override read from <c>.ttr/config.json</c> (plan §6.2), or null.</summary>
