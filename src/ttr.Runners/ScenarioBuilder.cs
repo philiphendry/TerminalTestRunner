@@ -274,11 +274,14 @@ public static class ScenarioBuilder
             Prelude: prelude, Postlude: postlude, RunsSupported: false);
     }
 
-    /// <summary>A build failure whose canonical diagnostic points at a committed fixture source, so the
-    /// 'o' modal opens on the build error (plan §7).</summary>
+    /// <summary>A build failure whose canonical diagnostic points at a stable, project-relative source path
+    /// (plan §7). It is deliberately NOT an absolute machine path (unlike the run-failure fixtures): the
+    /// build-failure detail is snapshotted (BackendSnapshotTests), and an absolute path's volatile prefix is
+    /// truncated at different points on different machines, making the snapshot non-deterministic (the Phase 6
+    /// scrubber-flake, brief M6). A short relative path renders identically everywhere.</summary>
     private static AppEvent.BuildFailed BrokenBuildFailed(string project)
     {
-        var file = FakeFailures.Fixture("Calculator.cs");
+        const string file = "src/Broken/Calculator.cs";
         var raw =
             $"{file}(17,20): error CS1002: ; expected\n" +
             $"{file}(19,13): error CS0103: The name 'retrun' does not exist in the current context\n" +

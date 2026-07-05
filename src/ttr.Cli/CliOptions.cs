@@ -4,9 +4,9 @@ using Ttr.Core;
 namespace Ttr.Cli;
 
 /// <summary>
-/// The command surface (plan §3). <c>--fake</c>, real targets, <c>--no-build</c>, <c>--log</c>,
-/// <c>--watch [build|external]</c>, and (Phase 6) <c>--continue</c>/<c>--state-dir</c> are functional;
-/// only <c>--tfm</c> remains reserved (defined so it parses, but rejects with "not yet implemented", exit 2).
+/// The command surface (plan §3). Every flag is functional as of Phase 7: <c>--fake</c>, real targets,
+/// <c>--no-build</c>, <c>--watch [build|external]</c>, <c>--continue</c>/<c>--state-dir</c>, and now
+/// <c>--tfm</c> (single-TFM filter, M1) and <c>--log</c> (the diagnostics umbrella, M1).
 /// </summary>
 public sealed class CliOptions
 {
@@ -29,9 +29,10 @@ public sealed class CliOptions
     public Option<bool> Continue { get; } = new("--continue") { Description = "Restore the previous session (results, UI, expansion); changed results show as Stale." };
     public Option<string?> StateDir { get; } = new("--state-dir") { Description = "Override the .ttr/ state directory location." };
 
-    // --- Reserved for later phases (defined-but-rejecting) ---
-    public Option<string?> Tfm { get; } = new("--tfm") { Description = "(reserved) Restrict to one TFM." };
-    public Option<string?> Log { get; } = new("--log") { Description = "(reserved) Diagnostic log path." };
+    public Option<string?> Tfm { get; } =
+        new("--tfm") { Description = "Restrict evaluation/discovery/run to one target framework (e.g. net10.0)." };
+    public Option<string?> Log { get; } =
+        new("--log") { Description = "Write diagnostics (adapter traffic, builds, watch timing, session store) to <path>." };
 
     public RootCommand BuildRoot()
     {
@@ -49,14 +50,20 @@ public sealed class CliOptions
     }
 
     /// <summary>
-    /// True if any reserved flag was *explicitly* supplied. <c>GetResult</c> returns a result even
-    /// for unsupplied options (carrying their default), so presence is detected via
+    /// Whether an option was *explicitly* supplied. <c>GetResult</c> returns a result even for
+    /// unsupplied options (carrying their default), so presence is detected via
     /// <see cref="OptionResult.Implicit"/> being false.
     /// </summary>
-    public bool AnyReserved(ParseResult pr) => IsSupplied(pr, Tfm);
-
     public bool IsSupplied(ParseResult pr, Option option) =>
         pr.GetResult(option) is { Implicit: false };
+
+    /// <summary>The requested single-TFM filter (M1), trimmed; null when <c>--tfm</c> was not supplied.</summary>
+    public string? ResolveTfm(ParseResult pr)
+    {
+        if (!IsSupplied(pr, Tfm)) return null;
+        var value = pr.GetValue(Tfm)?.Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
 
     /// <summary>Resolve <c>--watch [build|external]</c> (plan §16): bare <c>--watch</c> = build/source mode.
     /// Returns <see cref="WatchKind.Off"/> when not supplied; an error message for an unknown mode.</summary>

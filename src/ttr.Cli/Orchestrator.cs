@@ -21,6 +21,7 @@ public sealed class Orchestrator
     private readonly ChannelWriter<AppEvent> _events;
     private readonly CancellationToken _ct;
     private readonly SessionStore? _store;
+    private readonly DiagnosticLog? _diag;
 
     private long _lastRunGeneration;
     private long _lastToastId;
@@ -30,13 +31,14 @@ public sealed class Orchestrator
 
     public Orchestrator(
         ITestSessionAdapter? adapter, ChannelWriter<AppEvent> events, CancellationToken ct,
-        TestTarget? target = null, SessionStore? store = null)
+        TestTarget? target = null, SessionStore? store = null, DiagnosticLog? diag = null)
     {
         _adapter = adapter;
         _target = target ?? new TestTarget("");
         _events = events;
         _ct = ct;
         _store = store;
+        _diag = diag;
     }
 
     public void OnReduced(AppState prev, AppState next)
@@ -88,7 +90,11 @@ public sealed class Orchestrator
 
     private async Task SaveEffect(SessionSnapshot snapshot)
     {
-        try { await Task.Run(() => _store!.Save(snapshot), _ct).ConfigureAwait(false); }
+        try
+        {
+            await Task.Run(() => _store!.Save(snapshot), _ct).ConfigureAwait(false);
+            _diag?.Session("saved session state after run");
+        }
         catch (OperationCanceledException) { /* shutdown */ }
         catch (Exception) { /* persistence is best-effort; never disturb the session */ }
     }

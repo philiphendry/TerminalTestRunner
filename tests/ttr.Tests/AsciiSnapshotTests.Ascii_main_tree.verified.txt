@@ -1,0 +1,30 @@
+﻿ttr - files - 14 tests - 9+ 4x 1s                                                    fps 0 - p95 0ms
+x (fake)                                                                                    4x 9+ 1s
+  x Contoso.Sample.Tests                                                                    4x 9+ 1s
+    x net10.0                                                                               4x 9+ 1s
+      x Contoso.Sample.Calculations                                                         2x 6+ 1s
+        x CalculatorTests                                                                      2x 5+
+          x Add_ReturnsSum                                                                          
+          + Subtract_ReturnsDifference                                                              
+          + Divide_ByZero_Throws                                                                    
+          + Average_Empty_Throws                                                                    
+          x Add_Theory                                                                         1x 2+
+        + StringUtilitiesTests                                                                 1+ 1s
+          + Format_Trims                                                                            
+          s Format_Null_IsSkipped                                                                   
+      x Contoso.Sample.Networking                                                              2x 3+
+        x PaymentProcessorTests                                                                1x 2+
+          x Charge_ValidCard                                                                        
+          + Convert_SameCurrency_Identity                                                           
+          + RiskScore_HighAmount                                                                    
+        x SettlementTests                                                                      1x 1+
+          x Settle_Empty_Throws                                                                     
+          + Settle_GroupsByCurrency                                                                 
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+^v move - >< expand - s detail - b dock - w wrap - f failed - t times - r/R rerun - o open - Tab fo~

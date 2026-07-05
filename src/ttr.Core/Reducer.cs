@@ -444,9 +444,9 @@ public static class Reducer
 
         switch (k.KeyChar)
         {
-            // Quit: exit 1 if any test in the session's latest results failed, else 0 (plan §3, brief M4).
-            // Ctrl+C's 130 is handled earlier and always wins.
-            case 'q': return s with { ShouldQuit = true, ExitCode = s.Failed > 0 ? 1 : 0 };
+            // Quit with the scriptable exit code (plan §3, brief M1): 1 on failing tests, 3 when a build
+            // failure prevented ANY run, else 0. Ctrl+C's 130 is handled earlier and always wins.
+            case 'q': return s with { ShouldQuit = true, ExitCode = QuitCode(s) };
             case 'k': return detailFocused ? DetailScroll(s, -1) : Move(s, -1);
             case 'j': return detailFocused ? DetailScroll(s, +1) : Move(s, +1);
             case 'e': return ToggleExpand(s, recursive: false);
@@ -547,6 +547,20 @@ public static class Reducer
         var idx = IndexOf(s.Rows, id);
         if (idx < 0) return s;
         return MoveToIndex(s, idx);
+    }
+
+    /// <summary>The exit code for a clean <c>q</c> quit (plan §3): <c>1</c> if any test failed, else <c>3</c>
+    /// when a build failure prevented any run at all (a project failed to build AND nothing ran), else <c>0</c>.
+    /// Build failures are only ever set on the shallow Project nodes directly under the root, so the scan is
+    /// O(#projects). A partial build failure that still let other tests run is not a "prevented any run" case.</summary>
+    private static int QuitCode(AppState s)
+    {
+        if (s.Failed > 0) return 1;
+        var anyRan = s.Passed + s.Failed + s.Skipped > 0;
+        if (!anyRan)
+            foreach (var child in s.Root.Children)
+                if (child.BuildPhase == BuildPhase.Failed) return 3;
+        return 0;
     }
 
     private static AppState Fatal(AppState s, AppEvent.FatalError f)

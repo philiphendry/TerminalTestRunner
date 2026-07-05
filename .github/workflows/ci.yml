@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
 
 env:
@@ -91,6 +92,52 @@ jobs:
       - name: Assert exit-code correctness on real runs
         run: bash scripts/dogfood-exit-codes.sh "$(pwd)/src/ttr.Cli/bin/Debug/net10.0/ttr.dll" "$(pwd)/fixtures/matrix"
 
+  # Pack the global tool (brief M3, AC8). Produces a prerelease-suffixed .nupkg on every CI run and uploads it
+  # as a build artifact; the release job below re-packs the clean version on a tag.
+  pack:
+    name: pack global tool (.nupkg)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Pack (prerelease-suffixed)
+        run: >
+          dotnet pack src/ttr.Cli -c Release -o ./artifacts
+          --version-suffix "ci.${{ github.run_number }}"
+      - name: Upload .nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttr-nupkg
+          path: artifacts/*.nupkg
+
+  # Clean-machine install test (brief M3 / AC1) on Linux AND macOS: a fresh runner with only the .NET 10 SDK
+  # installs ttr from a local feed and runs the INSTALLED tool against the fixture matrix — discovery AND a run
+  # must work, re-proving POC-1 Strategy A (SDK-resolved vstest.console) from the global-tool install path.
+  install-test:
+    name: clean-machine install test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew install tmux
+      - name: Install from local feed and run the installed tool
+        run: bash scripts/install-test.sh
+
   # Watch-mode latency (brief M7 / AC5, closing POC-6 AC2): drive real watch cycles over fixtures/watch and
   # assert the T0→T4 median < 4 s bar on a normal (non-mounted) filesystem. This is the AUTHORITATIVE lane
   # for the bar — the agent sandbox's host-mounted FS is ~7× slower and not representative (see notes).
@@ -107,3 +154,33 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Measure watch cycle latency (fails if T0→T4 median ≥ 4s)
         run: bash scripts/watch-latency.sh 6
+
+  # Release (brief M3 / AC8): on a v* tag, pack the clean tag version and publish it as a GitHub Release asset.
+  # The version comes from the tag (v1.0.0 → 1.0.0); installing THIS .nupkg is what the AC1 install test covers.
+  release:
+    name: release (.nupkg on tag)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ test, install-test ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Pack release version
+        run: dotnet pack src/ttr.Cli -c Release -o ./artifacts -p:Version="${{ steps.ver.outputs.version }}"
+      - name: Upload release .nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ttr-release-nupkg
+          path: artifacts/*.nupkg
+      - name: Create GitHub Release with the .nupkg
+        run: gh release create "${GITHUB_REF_NAME}" ./artifacts/*.nupkg --generate-notes --title "ttr ${GITHUB_REF_NAME}"
+        env:
+          GH_TOKEN: ${{ github.token }}

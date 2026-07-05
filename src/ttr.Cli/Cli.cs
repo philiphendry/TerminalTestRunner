@@ -14,12 +14,6 @@ public static class Cli
 {
     public static int Run(CliOptions o, ParseResult pr)
     {
-        if (o.AnyReserved(pr))
-        {
-            Console.Error.WriteLine("not yet implemented: --tfm arrives in a later phase.");
-            return 2;
-        }
-
         var (watchKind, watchError) = o.ResolveWatch(pr);
         if (watchError is not null)
         {
@@ -29,12 +23,23 @@ public static class Cli
 
         var positionals = pr.GetValue(o.Targets) ?? [];
         var doContinue = o.IsSupplied(pr, o.Continue);
+        var tfm = o.ResolveTfm(pr);
+
+        // The --log umbrella (M1): one file, timestamped + category-prefixed. Created once here and threaded
+        // through every producer (session lifecycle, builds, adapters, watch cycles). Null ⇒ every log?.X() no-ops.
+        var logPathRaw = pr.GetValue(o.Log);
+        var diag = string.IsNullOrWhiteSpace(logPathRaw) ? null : new DiagnosticLog(Path.GetFullPath(logPathRaw));
 
         if (pr.GetValue(o.Fake))
         {
+            var seed = pr.GetValue(o.FakeSeed);
+            // --tfm has no meaning against the synthetic fake tree; accept it (so --fake composes for the AC2
+            // review command) and record that it was ignored rather than filtering nothing.
+            if (tfm is not null) diag?.Session($"--tfm '{tfm}' ignored in --fake mode (fake has no real TFMs)");
+
             // --fake --continue is the scripted restore demo (brief M1); --fake --watch is the watch demo.
-            if (doContinue) return App.RunFakeContinue();
-            if (watchKind != WatchKind.Off) return App.RunFakeWatch();
+            if (doContinue) { diag?.Session("start: --fake --continue demo"); return App.RunFakeContinue(diag); }
+            if (watchKind != WatchKind.Off) { diag?.Session("start: --fake --watch demo"); return App.RunFakeWatch(diag); }
 
             var scenario = positionals.Length > 0 ? positionals[0] : "default";
             if (!ScenarioBuilder.IsKnown(scenario))
@@ -43,21 +48,21 @@ public static class Cli
                     $"unknown fake scenario '{scenario}'. Known scenarios: default, big, flaky, slow, files, backend.");
                 return 2;
             }
-            return App.Run(scenario, pr.GetValue(o.FakeSeed));
+            diag?.Session($"start: --fake {scenario} (seed {seed})");
+            return App.Run(scenario, seed, diag);
         }
 
         var noBuild = o.IsSupplied(pr, o.NoBuild);
-        var logPath = pr.GetValue(o.Log);
         var stateDirOverride = o.IsSupplied(pr, o.StateDir) ? pr.GetValue(o.StateDir) : null;
-        return RunRealAsync(positionals, noBuild, logPath, watchKind, doContinue, stateDirOverride)
+        return RunRealAsync(positionals, noBuild, diag, watchKind, doContinue, stateDirOverride, tfm)
             .GetAwaiter().GetResult();
     }
 
     /// <summary>Resolve targets (§3/§4), evaluate + detect (§6.2), then hand the pipeline to the TUI. When
     /// <paramref name="watchKind"/> is set, also build the watch coordinator (Phase 5, plan §9).</summary>
     private static async Task<int> RunRealAsync(
-        string[] positionals, bool noBuild, string? logPath, WatchKind watchKind,
-        bool doContinue, string? stateDirOverride)
+        string[] positionals, bool noBuild, DiagnosticLog? diag, WatchKind watchKind,
+        bool doContinue, string? stateDirOverride, string? tfm)
     {
         // Target selection: positional targets, else a CWD top-level scan (one → auto; several → picker).
         IReadOnlyList<string> targets = positionals;
@@ -81,6 +86,10 @@ public static class Cli
         }
 
         var resolved = resolution.Resolved!;
+        diag?.Session($"targets resolved: primary={Path.GetFileName(resolved.PrimaryTargetPath ?? "targets")}, " +
+                      $"{resolved.ProjectPaths.Count} project(s)" + (tfm is null ? "" : $", --tfm {tfm}") +
+                      (noBuild ? ", --no-build" : "") + (watchKind != WatchKind.Off ? $", --watch {watchKind}" : "") +
+                      (doContinue ? ", --continue" : ""));
         // State dir: --state-dir override, else .ttr/ beside the primary target (plan §10, brief M2).
         var stateDir = stateDirOverride is { Length: > 0 }
             ? Path.GetFullPath(stateDirOverride)
@@ -89,11 +98,29 @@ public static class Cli
         var evaluator = new EvaluationService();
         var evaluations = EvaluateAll(evaluator, config, resolved.ProjectPaths);
 
+        // --tfm (M1): filter every evaluation to the single requested TFM. A project with no matching TFM
+        // drops out; if NO project across the target set declares it, that is a usage error (exit 2) with the
+        // valid list — the same shape as an unknown --watch mode. Filtering here means discovery/build/run all
+        // key off the pared-down Tfms list with no further special-casing (and it composes with --continue).
+        if (tfm is not null)
+        {
+            var available = evaluations.SelectMany(e => e.TfmMonikers)
+                .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t, StringComparer.Ordinal).ToList();
+            if (!available.Any(t => string.Equals(t, tfm, StringComparison.OrdinalIgnoreCase)))
+            {
+                Console.Error.WriteLine($"unknown --tfm '{tfm}' for the target set. Available: {string.Join(", ", available)}");
+                return 2;
+            }
+            evaluations = evaluations.Select(e => TfmFilter.Apply(e, tfm)).Where(e => e.Tfms.Count > 0).ToList();
+        }
+
         // Session store + fingerprint (the target files' content hashes). Restore, if asked, is validated
         // now (schema + fingerprint) but APPLIED after discovery so it attaches to the real tree (brief M4).
         var fingerprint = SessionStore.Fingerprint(resolved.PrimaryTargetPath, resolved.ProjectPaths);
         var store = new SessionStore(stateDir, fingerprint);
         var restore = doContinue ? store.Restore() : new RestoreOutcome(RestoreStatus.NoState);
+        if (doContinue) diag?.Session($"restore: status={restore.Status}" +
+            (restore.Status == RestoreStatus.Restored ? $", {restore.Session!.Tests.Count} result(s)" : ""));
 
         // Zero test projects: exit 2 normally, but watch mode stays alive with a notice (plan §4, brief M6) —
         // a test project may still be added/built while watching.
@@ -104,22 +131,30 @@ public static class Cli
         }
 
         var backend = new RealBackend(
-            evaluations, resolved.Phantoms, resolved.SolutionErrors, noBuild, logPath, evaluator, config);
+            evaluations, resolved.Phantoms, resolved.SolutionErrors, noBuild, diag, evaluator, config, tfm);
         var title = Path.GetFileName(resolved.PrimaryTargetPath ?? "targets");
 
         // A post-discovery action feeds the restore into the populated tree, and/or a degrade toast.
         var afterDiscovery = BuildRestoreAction(restore, evaluations);
 
-        var watchLogPath = watchKind == WatchKind.Off
-            ? null
-            // Watch-cycle timing (brief M7 / AC5) goes to its OWN file via TTR_WATCH_LOG, kept separate from
-            // --log (which is VSTest's diagnostic trace) so the two never clobber each other.
-            : Environment.GetEnvironmentVariable("TTR_WATCH_LOG");
+        // Watch-cycle timing (brief M7 / AC5): the dedicated TTR_WATCH_LOG file keeps the harness's raw
+        // `<cycle> <stage> <iso>` format (kept as a documented alias), while --log additionally receives the
+        // same stage marks under the WATCH category so all diagnostics live in one place.
+        var watchLogPath = watchKind == WatchKind.Off ? null : Environment.GetEnvironmentVariable("TTR_WATCH_LOG");
         var watchFactory = watchKind == WatchKind.Off
             ? null
-            : BuildWatchFactory(backend, resolved.ProjectPaths, evaluations, watchKind, watchLogPath);
+            : BuildWatchFactory(backend, resolved.ProjectPaths, evaluations, watchKind, watchLogPath, diag);
 
-        return App.RunReal(backend, title, store, afterDiscovery, watchKind, watchFactory);
+        return App.RunReal(backend, title, store, afterDiscovery, watchKind, watchFactory, diag);
+    }
+
+    /// <summary>Filter a project's per-TFM evaluations down to the single <c>--tfm</c> moniker (M1), keeping
+    /// everything else (path, display name) intact. Case-insensitive; an empty result means the project does
+    /// not target the requested TFM and is dropped by the caller.</summary>
+    private static class TfmFilter
+    {
+        public static ProjectEvaluation Apply(ProjectEvaluation e, string tfm) =>
+            e with { Tfms = e.Tfms.Where(t => string.Equals(t.Tfm, tfm, StringComparison.OrdinalIgnoreCase)).ToList() };
     }
 
     /// <summary>Build the post-discovery step (brief M4): if a prior session restored, emit
@@ -201,9 +236,9 @@ public static class Cli
     /// projects' output assemblies), and the test-project set the closure is intersected against.</summary>
     private static Func<ChannelWriter<AppEvent>, Func<AppState>, CancellationToken, WatchCoordinator> BuildWatchFactory(
         RealBackend backend, IReadOnlyList<string> allProjectPaths,
-        IReadOnlyList<ProjectEvaluation> evaluations, WatchKind watchKind, string? logPath)
+        IReadOnlyList<ProjectEvaluation> evaluations, WatchKind watchKind, string? logPath, DiagnosticLog? diag)
     {
-        var log = new WatchLog(logPath);
+        var log = new WatchLog(logPath, diag);
         var graph = new ProjectGraphService(allProjectPaths);
         var testProjects = evaluations.Where(IsTestProject).Select(e => e.ProjectPath).ToList();
 

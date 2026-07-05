@@ -24,9 +24,11 @@ public sealed class RealBackend : ITestSessionAdapter
     private readonly IReadOnlyList<PhantomProject> _phantoms;
     private readonly IReadOnlyList<SolutionError> _solutionErrors;
     private readonly bool _noBuild;
-    private readonly string? _logPath;
+    private readonly DiagnosticLog? _diag;
+    private readonly string? _vsTestDiagPath;
     private readonly EvaluationService? _evaluator;
     private readonly TtrConfig? _config;
+    private readonly string? _tfmFilter;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<ProjectEvaluation> _registered = [];
@@ -39,17 +41,22 @@ public sealed class RealBackend : ITestSessionAdapter
         IReadOnlyList<PhantomProject> phantoms,
         IReadOnlyList<SolutionError> solutionErrors,
         bool noBuild,
-        string? logPath = null,
+        DiagnosticLog? diag = null,
         EvaluationService? evaluator = null,
-        TtrConfig? config = null)
+        TtrConfig? config = null,
+        string? tfmFilter = null)
     {
         _projects = projects;
         _phantoms = phantoms;
         _solutionErrors = solutionErrors;
         _noBuild = noBuild;
-        _logPath = logPath;
+        _diag = diag;
+        // VSTest's diagnostics use vstest.console's own multi-line trace format, so they get a sibling file
+        // rather than being interleaved into the category-prefixed umbrella; the umbrella carries a pointer.
+        _vsTestDiagPath = diag is null ? null : diag.Path + ".vstest.diag";
         _evaluator = evaluator;
         _config = config;
+        _tfmFilter = tfmFilter;
     }
 
     /// <summary>The MTP server versions observed at handshake (project → serverInfo.version), for the notes/PR.</summary>
@@ -147,9 +154,11 @@ public sealed class RealBackend : ITestSessionAdapter
                 if (affectedSet.Contains(session.ProjectPath))
                     runs.Add(Guarded(() => session.RunAsync(runAll ? [] : subset, events, ct), ct));
 
+            _diag?.Adapter($"run {(runAll ? "all" : $"{subset.Count} test(s)")} across {affected.Count} project(s)");
             // Guarded() converts a single adapter's failure into completion (not a throw), so the merge
             // always finishes and RunCompleted fires — the reducer then sweeps any still-Running leaf.
             await Task.WhenAll(runs).ConfigureAwait(false);
+            _diag?.Adapter("run complete");
             events.TryWrite(new AppEvent.RunCompleted());
         }
         finally { _gate.Release(); }
@@ -214,6 +223,12 @@ public sealed class RealBackend : ITestSessionAdapter
                 try
                 {
                     var reEval = _evaluator.Evaluate(full, _config?.OverrideFor(full));
+                    // Keep --tfm (M1) honoured across a watch re-evaluation: re-applying the single-TFM filter
+                    // so a .csproj edit can't silently re-introduce the other target frameworks mid-session.
+                    if (_tfmFilter is not null)
+                        reEval = reEval with { Tfms = reEval.Tfms
+                            .Where(t => string.Equals(t.Tfm, _tfmFilter, StringComparison.OrdinalIgnoreCase)).ToList() };
+                    if (reEval.Tfms.Count == 0) continue;   // the changed project no longer targets the filtered TFM
                     _registered[index] = reEval;
                     var (runner, notice) = Classify(reEval);
                     if (runner is not RunnerKind.NotATest)
@@ -250,11 +265,18 @@ public sealed class RealBackend : ITestSessionAdapter
         var results = await Task.WhenAll(stale.Select(async p =>
         {
             events.TryWrite(new AppEvent.BuildStarted(p.ProjectPath));
+            _diag?.Build($"build {p.DisplayName} (noRestore={noRestore})");
             var outcome = await BuildService.BuildAsync(p.ProjectPath, ct, noRestore).ConfigureAwait(false);
             if (outcome.Success)
+            {
+                _diag?.Build($"build {p.DisplayName}: OK");
                 events.TryWrite(new AppEvent.BuildSucceeded(p.ProjectPath));
+            }
             else
+            {
+                _diag?.Build($"build {p.DisplayName}: FAILED ({outcome.Diagnostics.Count} diagnostic(s))");
                 events.TryWrite(new AppEvent.BuildFailed(p.ProjectPath, outcome.Diagnostics, outcome.RawOutput));
+            }
             return (p.ProjectPath, outcome.Success);
         })).ConfigureAwait(false);
 
@@ -314,7 +336,13 @@ public sealed class RealBackend : ITestSessionAdapter
             {
                 try
                 {
-                    _vsTest ??= new VsTestDiscoverer(_vsTestConsole, _logPath);
+                    if (_vsTest is null)
+                    {
+                        _vsTest = new VsTestDiscoverer(_vsTestConsole, _vsTestDiagPath);
+                        if (_vsTestDiagPath is not null)
+                            _diag?.Adapter($"vstest.console={Path.GetFileName(_vsTestConsole)}; diagnostics -> {_vsTestDiagPath}");
+                    }
+                    _diag?.Adapter($"vstest discover: {string.Join(", ", vstestSources.Select(s => Path.GetFileNameWithoutExtension(s.ProjectPath)))}");
                     await _vsTest.DiscoverAsync(vstestSources, events, counts =>
                     {
                         foreach (var path in expected)
@@ -349,13 +377,17 @@ public sealed class RealBackend : ITestSessionAdapter
             // keep discovering the other projects (Phase 3 had this guard in the static discover path).
             try
             {
+                _diag?.Adapter($"mtp start {proj.DisplayName} ({tfm.Tfm})");
                 if (await session.StartAsync(events, ct).ConfigureAwait(false))
                 {
+                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) handshake serverInfo.version={session.ServerVersion ?? "?"}");
                     await session.DiscoverAsync(events, ct).ConfigureAwait(false);
+                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) discovery complete");
                     _mtpSessions[key] = session;
                 }
                 else
                 {
+                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) failed to hand shake — no host");
                     await session.DisposeAsync().ConfigureAwait(false);
                 }
             }

@@ -18,15 +18,20 @@ public static class FrameBuilder
     public const int MinWidth = Layout.MinWidth;
     public const int MinHeight = Layout.MinHeight;
 
-    public static string Build(AppState state, RenderInfo info, int width, int height)
+    public static string Build(AppState state, RenderInfo info, int width, int height, Caps? caps = null)
     {
-        if (Layout.TooSmall(width, height)) return TooSmall(width, height);
-        if (state.Modal is { } modal) return ModalRenderer.Render(state, modal, width, height);
-        if (state.HelpVisible) return HelpRenderer.Render(width, height);
-        return Main(state, info, width, height);
+        caps ??= Caps.Full;
+        var frame =
+            Layout.TooSmall(width, height) ? TooSmall(width, height)
+            : state.Modal is { } modal ? ModalRenderer.Render(state, modal, width, height)
+            : state.HelpVisible ? HelpRenderer.Render(width, height)
+            : Main(state, info, width, height, caps);
+        // Single degrade chokepoint (brief M2): ASCII glyph transliteration and/or NO_COLOR strip. Identity for
+        // the full-capability default, so every pre-Phase-7 frame stays byte-identical.
+        return caps.Apply(frame);
     }
 
-    private static string Main(AppState s, RenderInfo info, int width, int height)
+    private static string Main(AppState s, RenderInfo info, int width, int height, Caps caps)
     {
         var sb = new StringBuilder(width * height + 256);
         var hasToast = s.Toast is not null;
@@ -40,14 +45,14 @@ public static class FrameBuilder
         // Body: tree only, tree|detail (right), or tree/detail (beneath).
         if (!s.DetailVisible)
         {
-            var tree = BuildTreeLines(s, info, width, bodyRows);
+            var tree = BuildTreeLines(s, info, width, bodyRows, caps);
             for (var i = 0; i < bodyRows; i++) Put(sb, bodyTop + i, tree[i]);
         }
         else if (s.DetailOrientation == DetailOrientation.Right)
         {
             var treeWidth = Layout.TreeWidth(s, width);
             var detailWidth = width - treeWidth - 1;
-            var tree = BuildTreeLines(s, info, treeWidth, bodyRows);
+            var tree = BuildTreeLines(s, info, treeWidth, bodyRows, caps);
             var detail = BuildDetailLines(s, detailWidth, bodyRows);
             for (var i = 0; i < bodyRows; i++)
                 Put(sb, bodyTop + i, tree[i] + Ansi.Dim + "│" + Ansi.Reset + detail[i]);
@@ -56,7 +61,7 @@ public static class FrameBuilder
         {
             var treeRows = Layout.TreeViewportRows(s, width, height);
             var detailRows = bodyRows - treeRows - 1;
-            var tree = BuildTreeLines(s, info, width, treeRows);
+            var tree = BuildTreeLines(s, info, width, treeRows, caps);
             for (var i = 0; i < treeRows; i++) Put(sb, bodyTop + i, tree[i]);
             Put(sb, bodyTop + treeRows, Ansi.Dim + new string('─', width) + Ansi.Reset);
             var detail = BuildDetailLines(s, width, detailRows);
@@ -143,7 +148,7 @@ public static class FrameBuilder
 
     // --- Tree pane --------------------------------------------------------------
 
-    private static List<string> BuildTreeLines(AppState s, RenderInfo info, int width, int rowCount)
+    private static List<string> BuildTreeLines(AppState s, RenderInfo info, int width, int rowCount, Caps caps)
     {
         var lines = new List<string>(rowCount);
         var rows = s.Rows;
@@ -157,7 +162,7 @@ public static class FrameBuilder
             {
                 var row = rows[rowIndex];
                 var selected = s.Selection is { } sel && sel.Equals(row.Node.Id);
-                lines.Add(TreeRow(row, selected, treeFocused, s.ShowDurations, info.SpinnerTick, width));
+                lines.Add(TreeRow(row, selected, treeFocused, s.ShowDurations, info.SpinnerTick, width, caps));
             }
             else
             {
@@ -167,13 +172,16 @@ public static class FrameBuilder
         return lines;
     }
 
-    private static string TreeRow(FlatRow row, bool selected, bool treeFocused, bool showDur, int tick, int width)
+    private static string TreeRow(FlatRow row, bool selected, bool treeFocused, bool showDur, int tick, int width, Caps caps)
     {
         var node = row.Node;
         var durCol = showDur && width >= 28 ? 8 : 0;
         var countsCol = width >= 44 ? 16 : width >= 30 ? 9 : 0;
         var indentCells = Math.Min(row.Depth * 2, Math.Max(0, width - 4));
-        var nameCol = Math.Max(0, width - indentCells - 2 - countsCol - durCol);
+        // Colourless staleness (brief M2): a grey dim can't show, so a stale row is marked with a leading '~'.
+        // It costs one cell, taken from the name budget so counts/duration columns stay aligned.
+        var stalePrefix = caps.StalePrefix && Glyphs.IsStaleForDisplay(node) ? "~" : "";
+        var nameCol = Math.Max(0, width - indentCells - 2 - stalePrefix.Length - countsCol - durCol);
 
         var (glyph, color) = Glyphs.ForNode(node, tick);
         // Build state labels apply to a project node even before it has children (discovery gated on
@@ -190,12 +198,13 @@ public static class FrameBuilder
 
         if (selected)
         {
-            var plain = indent + glyph + " " + nameCell + countsCell + durCell;
+            var plain = indent + stalePrefix + glyph + " " + nameCell + countsCell + durCell;
             return (treeFocused ? Ansi.Reverse : Ansi.Bold) + Cells.FitPad(plain, width) + Ansi.Reset;
         }
 
         var sb = new StringBuilder();
         sb.Append(indent);
+        sb.Append(stalePrefix);
         sb.Append(color).Append(glyph).Append(Ansi.Reset);
         sb.Append(' ');
         sb.Append(nameCell);

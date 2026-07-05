@@ -45,7 +45,7 @@ public static class Glyphs
     /// result is stale; a branch dims only when EVERY resulted leaf under it is stale and nothing is
     /// (re)running — so a branch with a fresh failure among stale siblings still shows red, not grey.
     /// </summary>
-    private static bool IsStaleForDisplay(TestNode node)
+    public static bool IsStaleForDisplay(TestNode node)
     {
         if (node.StaleLeaves == 0) return false;
         if (node.IsLeaf) return true;

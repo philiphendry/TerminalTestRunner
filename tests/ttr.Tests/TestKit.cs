@@ -174,6 +174,18 @@ internal static partial class TestKit
         return Scrub(text);
     }
 
+    /// <summary>Render a frame in the ASCII fallback tier (brief M2): non-Unicode glyphs, colour on (the
+    /// colour axis is invisible to the ANSI-stripped snapshot). The verified baseline is the Unicode frame
+    /// with ttr's glyph vocabulary transliterated to ASCII — no braille/box/arrows survive.</summary>
+    public static string RenderAscii(AppState s, int w, int h)
+    {
+        s = Reducer.Reduce(s, new AppEvent.Resized(w, h));
+        var shell = new StringUiShell(w, h);
+        shell.Write(FrameBuilder.Build(s, new RenderInfo(0, 0, 0, 0), w, h, new Caps(Unicode: false, Color: true)));
+        var text = string.Join("\n", VisibleRows(shell.LastFrame));
+        return Scrub(text);
+    }
+
     private static string Scrub(string text)
     {
         var baseDir = AppContext.BaseDirectory.TrimEnd('/', '\\');

@@ -17,8 +17,9 @@ public sealed class RenderLoop
 
     public void Run(
         IUiShell shell, ReducerLoop loop, RenderMetrics metrics,
-        ChannelWriter<AppEvent> events, CancellationToken ct)
+        ChannelWriter<AppEvent> events, CancellationToken ct, Caps? caps = null)
     {
+        caps ??= Caps.Full;
         long lastRevision = -1;
         var lastWidth = 0;
         var lastHeight = 0;
@@ -69,7 +70,7 @@ public sealed class RenderLoop
 
             if (tickDue) { tick++; lastTickMs = now; }
             var info = new RenderInfo(metrics.Fps, metrics.LatencyP95Ms, tick, wallClockMs);
-            shell.Write(FrameBuilder.Build(state, info, width, height));
+            shell.Write(FrameBuilder.Build(state, info, width, height, caps));
             metrics.FrameRendered();
             lastRevision = state.Revision;
             lastWidth = width;

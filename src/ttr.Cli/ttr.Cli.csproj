@@ -4,8 +4,28 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>Ttr.Cli</RootNamespace>
     <AssemblyName>ttr</AssemblyName>
+
+    <!-- .NET global tool packaging (brief M3). Version is 1.0.0; CI passes a version suffix for prerelease
+         (release-candidate) builds. IsPackable overrides the repo-wide default (false) for this project only. -->
+    <PackAsTool>true</PackAsTool>
     <ToolCommandName>ttr</ToolCommandName>
+    <PackageId>ttr</PackageId>
+    <IsPackable>true</IsPackable>
+    <Version>1.0.0</Version>
+    <Authors>ttr authors</Authors>
+    <Description>A cross-platform .NET terminal (TUI) unit-test runner and visualiser: discovers and runs tests via the platform APIs (VSTest / Microsoft.Testing.Platform — never by scraping `dotnet test`), shows them in a live navigable tree, and supports watch mode, session resume (--continue), and an in-app source viewer.</Description>
+    <PackageTags>dotnet-tool;testing;tui;terminal;test-runner;vstest;mtp</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/phendry/TerminalTestRunner</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/phendry/TerminalTestRunner</PackageProjectUrl>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pack the repo README as the NuGet package readme. -->
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
