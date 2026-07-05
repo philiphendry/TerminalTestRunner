@@ -136,7 +136,9 @@ public class SolutionParsingTests : IDisposable
         var proj = MakeProject("Alpha");
         var res = await TargetResolver.ResolveAsync([proj]);
         Assert.Equal(TargetOutcomeKind.Resolved, res.Kind);
-        Assert.Equal(proj, res.Resolved!.PrimaryTargetPath);
+        // The resolver returns the canonical full path (Path.GetFullPath), which normalises separators —
+        // compare against that, not the mixed-separator relative form MakeProject wrote (Windows lane).
+        Assert.Equal(Path.GetFullPath(proj), res.Resolved!.PrimaryTargetPath);
     }
 
     [Fact]
