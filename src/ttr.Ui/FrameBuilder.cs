@@ -139,8 +139,12 @@ public static class FrameBuilder
         var indentCells = Math.Min(row.Depth * 2, Math.Max(0, width - 4));
         var nameCol = Math.Max(0, width - indentCells - 2 - countsCol - durCol);
 
-        var (glyph, color) = node.IsLeaf ? Glyphs.ForLeaf(node.Status, tick) : Glyphs.ForBranch(node, tick);
-        var counts = node.IsLeaf ? "" : BranchCounts(node);
+        var (glyph, color) = Glyphs.ForNode(node, tick);
+        // Build state labels apply to a project node even before it has children (discovery gated on
+        // build). Notice nodes and test leaves carry no counts.
+        var counts = node.BuildPhase == BuildPhase.Building ? "building"
+            : node.BuildPhase == BuildPhase.Failed ? "build failed"
+            : node.IsLeaf ? "" : BranchCounts(node);
         var dur = durCol > 0 ? DetailComposer.FormatDuration(node.IsLeaf ? node.Duration : node.RollupDuration) : "";
 
         var indent = new string(' ', indentCells);
@@ -177,7 +181,9 @@ public static class FrameBuilder
     }
 
     private static string CountsColor(TestNode n) =>
-        n.Failed > 0 ? Ansi.Red : n.AnyRunning ? Ansi.Cyan : n.NotRun > 0 ? Ansi.Grey : Ansi.Green;
+        n.BuildPhase == BuildPhase.Building ? Ansi.Yellow
+        : n.BuildPhase == BuildPhase.Failed ? Ansi.Red
+        : n.Failed > 0 ? Ansi.Red : n.AnyRunning ? Ansi.Cyan : n.NotRun > 0 ? Ansi.Grey : Ansi.Green;
 
     // --- Detail pane ------------------------------------------------------------
 

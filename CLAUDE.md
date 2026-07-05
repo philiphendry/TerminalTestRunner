@@ -17,7 +17,7 @@ src/ttr.Ui        rendering + input (direct ANSI; behind IUiShell)
 src/ttr.Core      domain model, AppState, reducers, orchestration (no UI deps)
 src/ttr.Runners   ITestSessionAdapter implementations: Fake, VsTest, Mtp
 src/ttr.Build     MSBuildLocator, evaluation, ProjectGraph, build execution
-src/TtrParser     file-reference parser (lifted from POC-9; treat as stable)
+src/TtrParser     file-reference parser (implemented to plan §11.5/POC-9 spec in Phase 2; treat as stable)
 tests/            unit + snapshot tests; tests/corpus/ is the parser baseline
 docs/             plan, POC prompts, phase briefs
 fixtures/         sample test projects (added from Phase 3 on)
@@ -101,8 +101,9 @@ handle a null serializer as "unsupported extension". Loaded ≠ intact (truncate
 Classify by `TypeId` GUID, never the `Type` string. Run `File.Exists` on every resolved
 project path; phantoms are non-fatal warning nodes.
 
-**Parser / 'o' feature (plan §11.5):** `src/TtrParser` and `tests/corpus/` are lifted from
-POC-9 and are the regression baseline — extend the corpus rather than editing expectations.
+**Parser / 'o' feature (plan §11.5):** `src/TtrParser` (built to the POC-9 spec in Phase 2) and
+its fixture suite are the regression baseline — extend fixtures rather than editing expectations;
+swap in the original POC-9 corpus verbatim if those artifacts surface.
 Filter frames whose path contains `/obj/` or ends `.g.cs`. Set `DOTNET_CLI_UI_LANGUAGE=en`
 on every spawned test host (UI-culture only; `CurrentCulture` untouched). MTP nodes carry
 structured `location.file`/`location.line-start` — use as the default 'o' target.

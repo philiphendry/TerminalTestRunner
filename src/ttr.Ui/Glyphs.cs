@@ -15,7 +15,28 @@ public static class Glyphs
     public const string Skipped = "⊘";
     public const string Queued = "◌";
 
+    /// <summary>Warning-notice glyph (1 cell) — phantom / unknown-runner / dead-opt-in / zero-tests.</summary>
+    public const string Warning = "⚠";
+
+    /// <summary>Error-notice glyph (1 cell), distinct from the test-failed ✗ — unparseable entry / no handshake.</summary>
+    public const string Error = "✖";
+
     public static string SpinnerFrame(int tick) => Spinner[((tick % Spinner.Length) + Spinner.Length) % Spinner.Length];
+
+    /// <summary>
+    /// The glyph + colour for any node, honouring Phase 3 states in priority order (brief M1): a build
+    /// spinner while building, a red ✗ on build failure, then a warning/error notice glyph (which
+    /// overrides the rollup so the diagnostic is visible), else the normal leaf/branch glyph. An
+    /// <see cref="NoticeSeverity.Info"/> note does not override the glyph (it is not an alarm — plan §6.2).
+    /// </summary>
+    public static (string Glyph, string Color) ForNode(TestNode node, int tick)
+    {
+        if (node.BuildPhase == BuildPhase.Building) return (SpinnerFrame(tick), Ansi.Yellow);
+        if (node.BuildPhase == BuildPhase.Failed) return (Failed, Ansi.Red);
+        if (node.Notice is { Severity: NoticeSeverity.Error }) return (Error, Ansi.Red);
+        if (node.Notice is { Severity: NoticeSeverity.Warning }) return (Warning, Ansi.Yellow);
+        return node.IsLeaf ? ForLeaf(node.Status, tick) : ForBranch(node, tick);
+    }
 
     /// <summary>The glyph (1 cell) + colour for a leaf status. Running/Queued animate via <paramref name="tick"/>.</summary>
     public static (string Glyph, string Color) ForLeaf(TestStatus status, int tick) => status switch

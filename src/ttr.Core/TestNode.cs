@@ -50,6 +50,39 @@ public sealed class TestNode
         }
     }
 
+    // --- Phase 3: project registration, build phase, and diagnostics -----------
+
+    /// <summary>
+    /// The project's evaluated target frameworks (Project nodes only), set by
+    /// <see cref="AppEvent.ProjectRegistered"/>. <c>null</c> means the project was never registered
+    /// (the legacy fake scenarios): the tree then always inserts a TFM node, preserving Phase 1/2
+    /// shape. A single-element list collapses the TFM level (namespaces hang directly off the project);
+    /// two or more inserts TFM child nodes (brief M1, plan §8/D9).
+    /// </summary>
+    public IReadOnlyList<string>? DeclaredTfms { get; set; }
+
+    /// <summary>Whether the project needs an explicit TFM level. Meaningful once <see cref="DeclaredTfms"/> is set.</summary>
+    public bool NeedsTfmLevel => DeclaredTfms is null || DeclaredTfms.Count > 1;
+
+    /// <summary>Detected test platform for a Project node (plan §6.2); diagnostics only for other kinds.</summary>
+    public RunnerKind Runner { get; set; } = RunnerKind.Fake;
+
+    /// <summary>Build lifecycle of a Project node (plan §7); drives the build spinner / failure glyph.</summary>
+    public BuildPhase BuildPhase { get; set; } = BuildPhase.None;
+
+    /// <summary>Parsed build diagnostics attached on <see cref="AppEvent.BuildFailed"/>.</summary>
+    public IReadOnlyList<BuildDiagnostic> BuildDiagnostics { get; set; } = [];
+
+    /// <summary>Raw build output kept alongside parsed diagnostics as the user-openable fallback (plan §7).</summary>
+    public string? BuildOutput { get; set; }
+
+    /// <summary>
+    /// A diagnostic attached to this node (brief M1): a classification note on a Project node
+    /// (dead MTP opt-in, unknown runner, dual-mode info) or the payload of a standalone
+    /// <see cref="TestNodeKind.Notice"/> node (phantom / unparseable / smoke failure).
+    /// </summary>
+    public NodeNotice? Notice { get; set; }
+
     /// <summary>Per-status leaf counts of this subtree (index by <see cref="TestStatus"/>).</summary>
     public int[] Counts { get; } = new int[7];
 

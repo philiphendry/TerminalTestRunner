@@ -28,7 +28,7 @@ public static class Cli
         if (!ScenarioBuilder.IsKnown(scenario))
         {
             Console.Error.WriteLine(
-                $"unknown fake scenario '{scenario}'. Known scenarios: default, big, flaky, slow, files.");
+                $"unknown fake scenario '{scenario}'. Known scenarios: default, big, flaky, slow, files, backend.");
             return 2;
         }
 

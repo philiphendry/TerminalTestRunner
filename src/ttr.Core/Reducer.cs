@@ -23,6 +23,12 @@ public static class Reducer
     {
         var next = e switch
         {
+            AppEvent.ProjectRegistered p => ProjectRegistered(s, p),
+            AppEvent.NoticeRaised n => NoticeRaised(s, n),
+            AppEvent.BuildStarted b => BuildPhaseChanged(s, b.ProjectPath, BuildPhase.Building),
+            AppEvent.BuildSucceeded b => BuildPhaseChanged(s, b.ProjectPath, BuildPhase.Built),
+            AppEvent.BuildFailed b => BuildFailed(s, b),
+            AppEvent.DiscoveryFailed d => DiscoveryFailed(s, d),
             AppEvent.TestsDiscovered d => Discovered(s, d),
             AppEvent.TestStarted t => Started(s, t),
             AppEvent.TestFinished t => Finished(s, t),
@@ -122,6 +128,125 @@ public static class Reducer
 
         // Filter view may need a rebuild after the final sweep.
         return s.FailedOnly ? NormalizeView(RebuildRows(next), CurrentIndex(s)) : next;
+    }
+
+    // --- Phase 3: project registration, build phase & diagnostics ---------------
+
+    /// <summary>Create/refresh a Project node from evaluation + detection, before build/discovery (brief M1).
+    /// A single declared TFM collapses the TFM level; two or more insert TFM child nodes eagerly.</summary>
+    private static AppState ProjectRegistered(AppState s, AppEvent.ProjectRegistered p)
+    {
+        var expanded = s.Expanded.ToBuilder();
+        var structural = false;
+        var project = EnsureBranch(s.Root, p.ProjectPath, TestNodeKind.Project,
+            TestCaseId.ForBranch(TestNodeKind.Project, p.ProjectPath), p.DisplayName, expanded, ref structural);
+        project.DeclaredTfms = p.Tfms;
+        project.Runner = p.Runner;
+        project.Notice = p.Notice;
+
+        // Multi-targeting: materialise the TFM nodes now so the structure is visible before discovery.
+        if (p.Tfms.Count > 1)
+            foreach (var tfm in p.Tfms)
+                EnsureBranch(project, tfm, TestNodeKind.Tfm,
+                    TestCaseId.ForBranch(TestNodeKind.Tfm, p.ProjectPath, tfm), tfm, expanded, ref structural);
+
+        var next = s with
+        {
+            Expanded = expanded.ToImmutable(),
+            Selection = s.Selection ?? s.Root.Id,
+            TreeVersion = structural ? s.TreeVersion + 1 : s.TreeVersion,
+        };
+        return structural ? RebuildRows(next) : next;
+    }
+
+    /// <summary>Insert a standalone diagnostic node under the solution root (phantom / unparseable entry).</summary>
+    private static AppState NoticeRaised(AppState s, AppEvent.NoticeRaised n)
+    {
+        var existing = s.Root.FindChild(n.Key);
+        if (existing is not null)
+        {
+            existing.Notice = n.Notice;
+            return s with { };
+        }
+        var node = new TestNode
+        {
+            Id = TestCaseId.ForBranch(TestNodeKind.Notice, n.Key),
+            Kind = TestNodeKind.Notice,
+            Name = n.Name,
+            Parent = s.Root,
+            Notice = n.Notice,
+        };
+        s.Root.AddChild(n.Key, node);
+        var next = s with { Selection = s.Selection ?? s.Root.Id, TreeVersion = s.TreeVersion + 1 };
+        return RebuildRows(next);
+    }
+
+    private static AppState BuildPhaseChanged(AppState s, string projectPath, BuildPhase phase)
+    {
+        var project = s.Root.FindChild(projectPath);
+        if (project is null || project.BuildPhase == phase) return s;
+        project.BuildPhase = phase;
+        return WithBusy(s);
+    }
+
+    private static AppState BuildFailed(AppState s, AppEvent.BuildFailed b)
+    {
+        var project = s.Root.FindChild(b.ProjectPath);
+        if (project is null) return s;
+        project.BuildPhase = BuildPhase.Failed;
+        project.BuildDiagnostics = b.Diagnostics;
+        project.BuildOutput = b.RawOutput;
+        // Build diagnostics carry file paths (canonical `path(line,col): error CODE:`), so the 'o' modal
+        // works on build errors too (plan §7): derive the node's ordered refs from the raw output.
+        project.FileRefs = string.IsNullOrEmpty(b.RawOutput)
+            ? []
+            : FileReferenceParser.Parse(b.RawOutput, null, projectDir: ProjectDirOf(b.ProjectPath));
+        return WithBusy(s);
+    }
+
+    /// <summary>Runner smoke-validation failure → a warning/error <see cref="TestNodeKind.Notice"/> child
+    /// under the project (or its TFM node), never a silently empty subtree (plan §6.2).</summary>
+    private static AppState DiscoveryFailed(AppState s, AppEvent.DiscoveryFailed d)
+    {
+        var project = s.Root.FindChild(d.ProjectPath);
+        if (project is null) return s;
+        var parent = d.Tfm is { } tfm && project.NeedsTfmLevel
+            ? project.FindChild(tfm) ?? project
+            : project;
+
+        var key = "notice:" + (d.Tfm ?? "");
+        var existing = parent.FindChild(key);
+        if (existing is not null)
+        {
+            existing.Notice = d.Notice;
+            return WithBusy(s);
+        }
+        var node = new TestNode
+        {
+            Id = TestCaseId.ForBranch(TestNodeKind.Notice, d.ProjectPath, d.Tfm ?? "", "smoke"),
+            Kind = TestNodeKind.Notice,
+            Name = d.Notice.Summary,
+            Parent = parent,
+            Notice = d.Notice,
+        };
+        parent.AddChild(key, node);
+        var next = s with { TreeVersion = s.TreeVersion + 1 };
+        return RebuildRows(WithBusy(next));
+    }
+
+    /// <summary>Recompute the busy flag (any project mid-build) so the render loop animates build spinners.</summary>
+    private static AppState WithBusy(AppState s)
+    {
+        var busy = false;
+        foreach (var child in s.Root.Children)
+            if (child.BuildPhase == BuildPhase.Building) { busy = true; break; }
+        return s with { Busy = busy };
+    }
+
+    private static string ProjectDirOf(string projectPath)
+    {
+        try { return Path.GetDirectoryName(projectPath) ?? ""; }
+        catch (ArgumentException) { return ""; }
     }
 
     // --- Resize -----------------------------------------------------------------
@@ -337,6 +462,10 @@ public static class Reducer
 
     private static AppState Rerun(AppState s, bool rooted)
     {
+        // Phase 3 is read-only for real targets (and the 'backend' fake, which simulates one): runs
+        // arrive in Phase 4 (brief AC7). Fake scenarios keep RunsEnabled and run normally.
+        if (!s.RunsEnabled) return Toast(s, "runs arrive in Phase 4");
+
         var root = rooted ? s.Root : Selected(s).Node ?? s.Root;
         // Under 'f' the rerun set is the filter's visible set: currently-failed leaves plus any
         // already in-flight (Queued/Running) so a second r/R mid-run coalesces the same set.
@@ -496,10 +625,14 @@ public static class Reducer
         var project = EnsureBranch(root, id.Project, TestNodeKind.Project,
             TestCaseId.ForBranch(TestNodeKind.Project, id.Project), id.Project, expanded, ref structural);
 
-        var tfm = EnsureBranch(project, id.Tfm, TestNodeKind.Tfm,
-            TestCaseId.ForBranch(TestNodeKind.Tfm, id.Project, id.Tfm), id.Tfm, expanded, ref structural);
+        // A registered single-TFM project collapses the TFM level (namespaces hang off the project);
+        // multi-targeting projects and unregistered legacy fake scenarios keep the TFM node (brief M1).
+        var container = project.NeedsTfmLevel
+            ? EnsureBranch(project, id.Tfm, TestNodeKind.Tfm,
+                TestCaseId.ForBranch(TestNodeKind.Tfm, id.Project, id.Tfm), id.Tfm, expanded, ref structural)
+            : project;
 
-        var ns = EnsureBranch(tfm, id.Namespace, TestNodeKind.Namespace,
+        var ns = EnsureBranch(container, id.Namespace, TestNodeKind.Namespace,
             TestCaseId.ForBranch(TestNodeKind.Namespace, id.Project, id.Tfm, id.Namespace),
             id.Namespace, expanded, ref structural);
 
@@ -632,6 +765,7 @@ public static class Reducer
 
     private static IEnumerable<TestNode> Leaves(TestNode node)
     {
+        if (node.Kind == TestNodeKind.Notice) yield break;   // diagnostics are not test leaves
         if (node.IsLeaf)
         {
             yield return node;

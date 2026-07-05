@@ -7,6 +7,46 @@ namespace Ttr.Core;
 /// </summary>
 public abstract record AppEvent
 {
+    /// <summary>
+    /// A project entered the tree after MSBuild evaluation + §6.2 detection, BEFORE build/discovery
+    /// (Phase 3). Creates the Project node (keyed by <paramref name="ProjectPath"/>) with its display
+    /// name, detected runner, and evaluated TFM set — a single TFM collapses the TFM level, two or more
+    /// insert TFM child nodes eagerly. An optional <see cref="NodeNotice"/> carries a classification
+    /// note (dead MTP opt-in, unknown runner, dual-mode info).
+    /// </summary>
+    public sealed record ProjectRegistered(
+        string ProjectPath, string DisplayName, IReadOnlyList<string> Tfms,
+        RunnerKind Runner, NodeNotice? Notice = null) : AppEvent;
+
+    /// <summary>
+    /// A standalone diagnostic node under the solution root (brief M1, plan §4): a phantom project
+    /// (referenced but file-not-found) or an unparseable solution entry. <paramref name="Key"/> is a
+    /// unique child key; <paramref name="Name"/> is the display label.
+    /// </summary>
+    public sealed record NoticeRaised(string Key, string Name, NodeNotice Notice) : AppEvent;
+
+    /// <summary>A project's build started — the Project node shows a spinner (plan §7).</summary>
+    public sealed record BuildStarted(string ProjectPath) : AppEvent;
+
+    /// <summary>A project's build succeeded; discovery may proceed for it (plan §7).</summary>
+    public sealed record BuildSucceeded(string ProjectPath) : AppEvent;
+
+    /// <summary>
+    /// A project's build failed (plan §7): red project node whose detail pane shows the parsed
+    /// <paramref name="Diagnostics"/> and the <paramref name="RawOutput"/> fallback. The reducer derives
+    /// the node's 'o' file references from the raw output so the modal works on build errors too.
+    /// </summary>
+    public sealed record BuildFailed(
+        string ProjectPath, IReadOnlyList<BuildDiagnostic> Diagnostics, string RawOutput) : AppEvent;
+
+    /// <summary>
+    /// Runner smoke validation failed for a (project, TFM) (plan §6.2): an MTP host that exited without
+    /// a handshake, or a test project that discovered zero tests. Surfaces a warning
+    /// <see cref="TestNodeKind.Notice"/> child under the project (or its TFM node) — never a silently
+    /// empty subtree. <paramref name="Tfm"/> is null for single-TFM projects.
+    /// </summary>
+    public sealed record DiscoveryFailed(string ProjectPath, string? Tfm, NodeNotice Notice) : AppEvent;
+
     /// <summary>A batch of discovered tests (streamed as discovery finds them).</summary>
     public sealed record TestsDiscovered(IReadOnlyList<TestIdentity> Tests) : AppEvent;
 

@@ -1,0 +1,40 @@
+﻿ttr · backend · 8 tests · 0✓ 0✗ 0⊘ · [s]                                             fps 0 · p95 0ms
+○ (fake)                                                 8○│Detail · Broken.Tests                   
+  ○ XunitV2.Tests                                        2○│Broken.Tests                            
+    ○ Contoso.Calc                                       2○│Build failed                            
+      ○ CalculatorTests                                  2○│                                        
+        ○ Add_ReturnsSum                                   │2 diagnostic(s):                        
+        ○ Subtract_ReturnsDifference                       │  {SolutionDirectory}tests/ttr.T…
+  ○ XunitV3.Tests                                        4○│  {SolutionDirectory}tests/ttr.T…
+    ○ net10.0                                            2○│                                        
+      ○ Contoso.Api                                      2○│Build output:                           
+        ○ ClientTests                                    2○│  {SolutionDirectory}tests/ttr.T…
+          ○ Get_Succeeds                                   │  {SolutionDirectory}tests/ttr.T…
+          ○ Post_Succeeds                                  │      1 Error(s)                        
+    ○ net8.0                                             2○│  Build FAILED.                         
+      ○ Contoso.Api                                      2○│                                        
+        ○ ClientTests                                    2○│                                        
+          ○ Get_Succeeds                                   │                                        
+          ○ Post_Succeeds                                  │                                        
+  ○ MsTestSdk.Tests                                      1○│                                        
+    ○ Contoso.Data                                       1○│                                        
+      ○ RepositoryTests                                  1○│                                        
+        ○ Save_Persists                                    │                                        
+  ⚠ Migrating.Tests                                      1○│                                        
+    ○ Contoso.Legacy                                     1○│                                        
+      ○ OldTests                                         1○│                                        
+        ○ StillWorks                                       │                                        
+  ⚠ Mystery.Tests                                          │                                        
+  ✗ Broken.Tests                               build failed│                                        
+  ○ NUnit4Broken.Tests                                     │                                        
+    ⚠ test project discovered zero tests                   │                                        
+  ○ Ghost.Mtp.Tests                                        │                                        
+    ✖ MTP host exited without a handshake                  │                                        
+  ⚠ Missing.Tests                                          │                                        
+  ✖ <unparseable solution entry>                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+                                                           │                                        
+↑↓ move · →← expand · s detail · b dock · w wrap · f failed · t times · r/R rerun · o open · Tab fo…

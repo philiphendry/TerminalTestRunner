@@ -35,6 +35,16 @@ public sealed class FakeAdapter : ITestSessionAdapter
     public async Task DiscoverAsync(TestTarget target, ChannelWriter<AppEvent> events, CancellationToken ct)
     {
         var p = _scenario.Pacing;
+
+        // Backend scenario: project registration + build lifecycle stream first, spaced so the build
+        // spinner is visible, then test discovery, then smoke-validation notices (brief M1).
+        if (_scenario.Prelude is { } prelude)
+            foreach (var e in prelude)
+            {
+                events.TryWrite(e);
+                await Task.Delay(p.DiscoveryBatchDelayMs, ct).ConfigureAwait(false);
+            }
+
         var batch = new List<TestIdentity>(p.DiscoveryBatchSize);
         foreach (var plan in _scenario.Plans)
         {
@@ -49,6 +59,13 @@ public sealed class FakeAdapter : ITestSessionAdapter
         }
         if (batch.Count > 0)
             events.TryWrite(new AppEvent.TestsDiscovered(batch));
+
+        if (_scenario.Postlude is { } postlude)
+            foreach (var e in postlude)
+            {
+                events.TryWrite(e);
+                await Task.Delay(p.DiscoveryBatchDelayMs, ct).ConfigureAwait(false);
+            }
     }
 
     public async Task RunAsync(

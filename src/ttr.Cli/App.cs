@@ -29,13 +29,14 @@ public static class App
         var metrics = new RenderMetrics();
         var adapter = new FakeAdapter(scenario, seed);
         var target = new TestTarget(scenario);
+        var runsEnabled = adapter.Scenario.RunsSupported;
 
         using var cts = new CancellationTokenSource();
 
         // The orchestrator launches side effects (reruns, 'o' highlighting, toast expiry) in reaction
         // to reducer-produced state; the reducer loop invokes it after each change (plan invariant 1).
         var orchestrator = new Orchestrator(adapter, target, channel.Writer, cts.Token);
-        var loop = new ReducerLoop(AppState.Initial(scenario), orchestrator.OnReduced);
+        var loop = new ReducerLoop(AppState.Initial(scenario, runsEnabled), orchestrator.OnReduced);
         using var shell = new AnsiConsoleShell();
         shell.Enter();
         try
@@ -59,7 +60,9 @@ public static class App
                 try
                 {
                     await adapter.DiscoverAsync(target, channel.Writer, cts.Token);
-                    await adapter.RunAsync(target, [], channel.Writer, cts.Token);
+                    // Phase 3 read-only scenarios (backend) discover only; runs arrive in Phase 4.
+                    if (runsEnabled)
+                        await adapter.RunAsync(target, [], channel.Writer, cts.Token);
                 }
                 catch (OperationCanceledException) { /* shutdown */ }
                 catch (Exception ex)

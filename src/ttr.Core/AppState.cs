@@ -38,8 +38,19 @@ public sealed record AppState
 
     public string ScenarioName { get; init; } = "";
 
+    /// <summary>
+    /// Whether test execution is available this session (plan §14 Phase 3 = read-only). Fake scenarios
+    /// set this true; real targets (and the <c>backend</c> fake, which simulates a real read-only run)
+    /// set it false, so <c>r</c>/<c>R</c> politely toast "runs arrive in Phase 4" instead of launching.
+    /// </summary>
+    public bool RunsEnabled { get; init; } = true;
+
     /// <summary>True while a run is in progress (drives spinner animation / header state).</summary>
     public bool Running { get; init; }
+
+    /// <summary>True while any project is building (plan §7). Drives the build-spinner animation the same
+    /// way <see cref="Running"/> drives the run spinner — the render loop ticks while either is set.</summary>
+    public bool Busy { get; init; }
 
     /// <summary>Wall-clock elapsed of the current/last run (shown separately from summed durations, plan §11.2).</summary>
     public TimeSpan RunWallClock { get; init; }
@@ -94,19 +105,20 @@ public sealed record AppState
     public int RunningCount => Root.Running;
     public int NotRunCount => Root.NotRun;
 
-    public static AppState Initial(string scenarioName)
+    public static AppState Initial(string scenarioName, bool runsEnabled = true, string rootName = "(fake)")
     {
         var root = new TestNode
         {
             Id = TestCaseId.ForBranch(TestNodeKind.Solution, "root"),
             Kind = TestNodeKind.Solution,
-            Name = "(fake)",
+            Name = rootName,
         };
         var expanded = ImmutableHashSet.Create(root.Id);
         return new AppState
         {
             Root = root,
             ScenarioName = scenarioName,
+            RunsEnabled = runsEnabled,
             Expanded = expanded,
             Rows = TreeFlattener.Flatten(root, expanded),
         };

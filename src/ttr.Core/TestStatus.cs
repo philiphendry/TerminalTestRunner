@@ -38,4 +38,8 @@ public enum TestNodeKind
     Class,
     Method,
     Case,
+
+    /// <summary>A standalone diagnostic node (phantom project, unparseable solution entry,
+    /// smoke-validation failure). Carries a <see cref="NodeNotice"/>; never counted as a test leaf.</summary>
+    Notice,
 }

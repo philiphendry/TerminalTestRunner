@@ -76,6 +76,49 @@ internal static partial class TestKit
         return s;
     }
 
+    /// <summary>Deterministically drive the Phase 3 <c>backend</c> scenario: prelude (registration +
+    /// build lifecycle + phantom/unparseable notices), then discover all upfront tests, then the
+    /// postlude smoke-validation notices. Runs are disabled, so tests remain NotRun (read-only).</summary>
+    public static AppState PlayBackend()
+    {
+        var built = ScenarioBuilder.Build("backend", 0);
+        var s = AppState.Initial("backend", built.RunsSupported);
+        foreach (var e in built.Prelude ?? []) s = Reducer.Reduce(s, e);
+        foreach (var plan in built.Plans.Where(p => p.DiscoverUpfront))
+            s = Reducer.Reduce(s, new AppEvent.TestsDiscovered([plan.Identity]));
+        foreach (var e in built.Postlude ?? []) s = Reducer.Reduce(s, e);
+        return s;
+    }
+
+    /// <summary>Row index of a node by id in the current flattened rows (-1 if not visible).</summary>
+    public static int RowIndexOf(AppState s, TestCaseId id)
+    {
+        for (var i = 0; i < s.Rows.Count; i++)
+            if (s.Rows[i].Node.Id.Equals(id)) return i;
+        return -1;
+    }
+
+    /// <summary>Move the selection onto a node by id, deterministically (Home then Down), so scroll clamps
+    /// the same way it would for a user navigating there.</summary>
+    public static AppState SelectRow(AppState s, TestCaseId id)
+    {
+        var target = RowIndexOf(s, id);
+        if (target < 0) return s;
+        s = Press(s, Key('\0', ConsoleKey.Home));
+        for (var i = 0; i < target; i++) s = Press(s, Key('\0', ConsoleKey.DownArrow));
+        return s;
+    }
+
+    public static TestCaseId ProjectId(string projectPath) => TestCaseId.ForBranch(TestNodeKind.Project, projectPath);
+
+    /// <summary>Move the selection onto the first visible row whose node name equals <paramref name="name"/>.</summary>
+    public static AppState SelectByName(AppState s, string name)
+    {
+        for (var i = 0; i < s.Rows.Count; i++)
+            if (s.Rows[i].Node.Name == name) return SelectRow(s, s.Rows[i].Node.Id);
+        return s;
+    }
+
     /// <summary>Render a frame through the in-memory shell at (w,h); returns the ANSI-stripped visible
     /// grid with machine paths scrubbed, so snapshots are deterministic across machines/OS.</summary>
     public static string Render(AppState s, int w, int h)

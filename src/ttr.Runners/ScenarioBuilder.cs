@@ -64,6 +64,7 @@ public static class ScenarioBuilder
                 pacing: new FakePacing(20, 40, 6, 25), durationScale: 1.0, includeTheory: true,
                 failChance: 0.30) with { RerunPassProbability = 0.6 },
             "files" => Files(),
+            "backend" => Backend(),
             _ => Grid("default", rng, nsCount: 3, classesPerNs: 5, methodsPerClass: 20,
                 pacing: new FakePacing(25, 35, 8, 6), durationScale: 1.0, includeTheory: true),
         };
@@ -71,7 +72,7 @@ public static class ScenarioBuilder
 
     /// <summary>Is <paramref name="name"/> a scenario ttr can run this phase?</summary>
     public static bool IsKnown(string name) =>
-        name is "default" or "big" or "flaky" or "slow" or "files";
+        name is "default" or "big" or "flaky" or "slow" or "files" or "backend";
 
     private static FakeScenario Grid(
         string name, Random rng, int nsCount, int classesPerNs, int methodsPerClass,
@@ -174,6 +175,120 @@ public static class ScenarioBuilder
         }
 
         return new FakeScenario("files", plans, new FakePacing(6, 25, 8, 8));
+    }
+
+    /// <summary>
+    /// The Phase 3 <c>backend</c> scenario (brief M1): a simulated read-only discovery session that
+    /// exercises EVERY new UI state fake-first — project registration with detection, the build
+    /// spinner + build-failure node, the multi-TFM level, and the full family of warning/error nodes
+    /// (phantom, unparseable solution entry, unknown runner, dead MTP opt-in, dual-mode info, and both
+    /// smoke-validation failures). Runs are disabled (<see cref="FakeScenario.RunsSupported"/> = false),
+    /// so <c>r</c>/<c>R</c> toast "runs arrive in Phase 4". Fully deterministic (no RNG).
+    /// </summary>
+    private static FakeScenario Backend()
+    {
+        const string Root = "matrix";
+        string Proj(string name) => $"{Root}/{name}/{name}.csproj";
+
+        // Project paths (identity keys; they need not exist on disk).
+        var x2 = Proj("XunitV2.Tests");
+        var x3 = Proj("XunitV3.Tests");
+        var ms = Proj("MsTestSdk.Tests");
+        var mig = Proj("Migrating.Tests");
+        var unk = Proj("Mystery.Tests");
+        var broken = Proj("Broken.Tests");
+        var nunit = Proj("NUnit4Broken.Tests");
+        var hang = Proj("Ghost.Mtp.Tests");
+
+        var prelude = new List<AppEvent>
+        {
+            new AppEvent.ProjectRegistered(x2, "XunitV2.Tests", ["net10.0"], RunnerKind.VsTest),
+            new AppEvent.ProjectRegistered(x3, "XunitV3.Tests", ["net10.0", "net8.0"], RunnerKind.Mtp),
+            new AppEvent.ProjectRegistered(ms, "MsTestSdk.Tests", ["net10.0"], RunnerKind.Mtp,
+                new NodeNotice(NoticeSeverity.Info, "dual-mode: a classic VSTest adapter is also present",
+                    "EnableMSTestRunner + TestingPlatformDotnetTestSupport both work; ttr uses MTP.")),
+            new AppEvent.ProjectRegistered(mig, "Migrating.Tests", ["net10.0"], RunnerKind.VsTest,
+                new NodeNotice(NoticeSeverity.Warning, "incomplete MTP migration?",
+                    "UseMicrosoftTestingPlatformRunner=true but no referenced package reads it — this " +
+                    "project runs pure VSTest. Remove the dead opt-in or finish the migration.")),
+            new AppEvent.ProjectRegistered(unk, "Mystery.Tests", ["net10.0"], RunnerKind.Unknown,
+                new NodeNotice(NoticeSeverity.Warning, "test-shaped project, no recognised runner",
+                    "IsTestProject=true but no xUnit/NUnit/MSTest/TUnit adapter was found.")),
+            new AppEvent.ProjectRegistered(broken, "Broken.Tests", ["net10.0"], RunnerKind.VsTest),
+            new AppEvent.ProjectRegistered(nunit, "NUnit4Broken.Tests", ["net10.0"], RunnerKind.Mtp),
+            new AppEvent.ProjectRegistered(hang, "Ghost.Mtp.Tests", ["net10.0"], RunnerKind.Mtp),
+
+            // Standalone diagnostic nodes under the solution root.
+            new AppEvent.NoticeRaised("phantom:Missing.Tests", "Missing.Tests",
+                new NodeNotice(NoticeSeverity.Warning, "project file not found",
+                    $"{Root}/Missing.Tests/Missing.Tests.csproj referenced by the solution does not exist.")),
+            new AppEvent.NoticeRaised("badentry", "<unparseable solution entry>",
+                new NodeNotice(NoticeSeverity.Error, "could not parse solution project entry",
+                    "The .slnx <Project> element is malformed; this entry was skipped.")),
+
+            // Builds (start → succeed), with one hard failure.
+            new AppEvent.BuildStarted(x2), new AppEvent.BuildSucceeded(x2),
+            new AppEvent.BuildStarted(x3), new AppEvent.BuildSucceeded(x3),
+            new AppEvent.BuildStarted(ms), new AppEvent.BuildSucceeded(ms),
+            new AppEvent.BuildStarted(mig), new AppEvent.BuildSucceeded(mig),
+            new AppEvent.BuildStarted(nunit), new AppEvent.BuildSucceeded(nunit),
+            new AppEvent.BuildStarted(hang), new AppEvent.BuildSucceeded(hang),
+            new AppEvent.BuildStarted(broken), BrokenBuildFailed(broken),
+        };
+
+        var plans = new List<FakePlan>();
+        void Test(string project, string tfm, string ns, string cls, string method)
+        {
+            var id = TestCaseId.ForCase(AdapterKind, project, tfm, $"{ns}.{cls}.{method}", null);
+            plans.Add(new FakePlan(
+                new TestIdentity(id, project, tfm, ns, cls, method),
+                TestOutcome.Passed, TimeSpan.FromMilliseconds(5), DiscoverUpfront: true));
+        }
+
+        // Single-TFM VSTest project (no TFM node).
+        Test(x2, "net10.0", "Contoso.Calc", "CalculatorTests", "Add_ReturnsSum");
+        Test(x2, "net10.0", "Contoso.Calc", "CalculatorTests", "Subtract_ReturnsDifference");
+        // Multi-TFM MTP project (tests under both TFM nodes).
+        Test(x3, "net10.0", "Contoso.Api", "ClientTests", "Get_Succeeds");
+        Test(x3, "net10.0", "Contoso.Api", "ClientTests", "Post_Succeeds");
+        Test(x3, "net8.0", "Contoso.Api", "ClientTests", "Get_Succeeds");
+        Test(x3, "net8.0", "Contoso.Api", "ClientTests", "Post_Succeeds");
+        // Dual-mode MTP + dead-opt-in VSTest projects still discover normally.
+        Test(ms, "net10.0", "Contoso.Data", "RepositoryTests", "Save_Persists");
+        Test(mig, "net10.0", "Contoso.Legacy", "OldTests", "StillWorks");
+
+        // Smoke-validation failures (no tests discovered) surface warning/error notice children.
+        var postlude = new List<AppEvent>
+        {
+            new AppEvent.DiscoveryFailed(nunit, null,
+                new NodeNotice(NoticeSeverity.Warning, "test project discovered zero tests",
+                    "NUnit4 + NUnit3TestAdapter + EnableMicrosoftTestingPlatformRunner is a silent no-op " +
+                    "(POC-9): the host built and exited 0 but generated no MTP entry point.")),
+            new AppEvent.DiscoveryFailed(hang, null,
+                new NodeNotice(NoticeSeverity.Error, "MTP host exited without a handshake",
+                    "The server process started but never completed the initialize handshake.")),
+        };
+
+        // Pacing: register/build events stream with a small gap so the build spinner is briefly visible.
+        return new FakeScenario("backend", plans, new FakePacing(4, 60, 8, 0),
+            Prelude: prelude, Postlude: postlude, RunsSupported: false);
+    }
+
+    /// <summary>A build failure whose canonical diagnostic points at a committed fixture source, so the
+    /// 'o' modal opens on the build error (plan §7).</summary>
+    private static AppEvent.BuildFailed BrokenBuildFailed(string project)
+    {
+        var file = FakeFailures.Fixture("Calculator.cs");
+        var raw =
+            $"{file}(17,20): error CS1002: ; expected\n" +
+            $"{file}(19,13): error CS0103: The name 'retrun' does not exist in the current context\n" +
+            "    1 Error(s)\nBuild FAILED.";
+        var diags = new[]
+        {
+            new BuildDiagnostic(file, 17, 20, "CS1002", "; expected"),
+            new BuildDiagnostic(file, 19, 13, "CS0103", "The name 'retrun' does not exist in the current context"),
+        };
+        return new AppEvent.BuildFailed(project, diags, raw);
     }
 
     /// <summary>A theory whose Case children are announced ONLY via run events (the 1→N shape).</summary>

@@ -17,7 +17,24 @@ public static class DetailComposer
     public static IReadOnlyList<DetailLine> Compose(TestNode node)
     {
         var lines = new List<DetailLine>();
-        if (!node.IsLeaf)
+        if (node.Kind == TestNodeKind.Notice)
+        {
+            ComposeNotice(node, lines);
+            return lines;
+        }
+        if (node.BuildPhase == BuildPhase.Failed)
+        {
+            // A build-failed project has no discovered children (discovery is gated on build), so route
+            // by build state before the leaf check below (plan §7).
+            ComposeBuildFailure(node, lines);
+            return lines;
+        }
+        // Structural nodes are branches even when childless (e.g. a project mid-build, or an
+        // unknown-runner project with no tests); only Method/Case nodes are true test leaves.
+        var isBranch = !node.IsLeaf
+            || node.Kind is TestNodeKind.Solution or TestNodeKind.Project or TestNodeKind.Tfm
+                or TestNodeKind.Namespace or TestNodeKind.Class;
+        if (isBranch)
         {
             ComposeBranch(node, lines);
             return lines;
@@ -67,9 +84,61 @@ public static class DetailComposer
         return lines;
     }
 
+    /// <summary>A standalone diagnostic node (phantom / unparseable / smoke failure): its notice, verbatim.</summary>
+    private static void ComposeNotice(TestNode node, List<DetailLine> lines)
+    {
+        lines.Add(new DetailLine(node.Name, Header: true));
+        if (node.Notice is not { } n)
+        {
+            lines.Add(new DetailLine("(no detail)"));
+            return;
+        }
+        lines.Add(new DetailLine($"{n.Severity}: {n.Summary}"));
+        if (!string.IsNullOrEmpty(n.Detail))
+        {
+            lines.Add(new DetailLine(""));
+            foreach (var l in Split(n.Detail)) lines.Add(new DetailLine("  " + l));
+        }
+    }
+
+    /// <summary>A build-failed project: parsed diagnostics (openable via 'o') then the raw output fallback (plan §7).</summary>
+    private static void ComposeBuildFailure(TestNode node, List<DetailLine> lines)
+    {
+        lines.Add(new DetailLine(node.Name, Header: true));
+        lines.Add(new DetailLine("Build failed"));
+
+        if (node.BuildDiagnostics.Count > 0)
+        {
+            lines.Add(new DetailLine(""));
+            lines.Add(new DetailLine($"{node.BuildDiagnostics.Count} diagnostic(s):", Header: true));
+            foreach (var d in node.BuildDiagnostics)
+            {
+                var text = d.ToString();
+                lines.Add(new DetailLine("  " + text, Underline: ResolvesInLine(node, text)));
+            }
+        }
+
+        if (!string.IsNullOrEmpty(node.BuildOutput))
+        {
+            lines.Add(new DetailLine(""));
+            lines.Add(new DetailLine("Build output:", Header: true));
+            foreach (var l in Split(node.BuildOutput)) lines.Add(new DetailLine("  " + l));
+        }
+    }
+
     private static void ComposeBranch(TestNode node, List<DetailLine> lines)
     {
         lines.Add(new DetailLine(node.Name, Header: true));
+
+        // A classification note on the project (dead MTP opt-in, unknown runner, dual-mode info) leads.
+        if (node.Notice is { } notice)
+        {
+            lines.Add(new DetailLine($"{notice.Severity}: {notice.Summary}"));
+            if (!string.IsNullOrEmpty(notice.Detail))
+                foreach (var l in Split(notice.Detail)) lines.Add(new DetailLine("  " + l));
+            lines.Add(new DetailLine(""));
+        }
+
         lines.Add(new DetailLine(
             $"{node.TotalLeaves} tests · {node.Passed}✓ {node.Failed}✗ {node.Skipped}⊘"));
 
