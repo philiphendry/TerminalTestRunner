@@ -247,10 +247,16 @@ public static class FrameBuilder
 
     // --- Shared -----------------------------------------------------------------
 
-    /// <summary>Write a line at 1-based <paramref name="row"/>, clearing any stale tail.</summary>
+    /// <summary>
+    /// Write a line at 1-based <paramref name="row"/>. Clears the line BEFORE writing the content, not
+    /// after: a full-width line ends with a glyph in the terminal's last column (pending-wrap state), and
+    /// a trailing <c>ClearToEol</c> there erases that glyph on strict terminals (the "build faile" / "8"
+    /// clipping). Clearing first, then writing, leaves the last glyph intact — the next line's absolute
+    /// cursor move cancels the pending wrap. (ANSI-stripped snapshots are unaffected by the reorder.)
+    /// </summary>
     private static void Put(StringBuilder sb, int row, string content)
     {
-        sb.Append(Ansi.MoveTo(row, 1)).Append(content).Append(Ansi.ClearToEol);
+        sb.Append(Ansi.MoveTo(row, 1)).Append(Ansi.ClearToEol).Append(content);
     }
 
     private static string TooSmall(int width, int height)
@@ -260,14 +266,13 @@ public static class FrameBuilder
         var mid = Math.Max(1, height / 2);
         for (var line = 1; line <= Math.Max(1, height); line++)
         {
-            sb.Append(Ansi.MoveTo(line, 1));
+            sb.Append(Ansi.MoveTo(line, 1)).Append(Ansi.ClearToEol);   // clear first (see Put)
             if (line == mid && width > 0)
             {
                 var text = Cells.Fit(msg, width);
                 var pad = Math.Max(0, (width - Cells.Width(text)) / 2);
                 sb.Append(new string(' ', pad)).Append(text);
             }
-            sb.Append(Ansi.ClearToEol);
         }
         return sb.ToString();
     }

@@ -27,13 +27,12 @@ public static class Overlay
         var sb = new StringBuilder(screenW * screenH + 256);
         for (var row = 1; row <= screenH; row++)
         {
-            sb.Append(Ansi.MoveTo(row, 1));
+            // Clear the line BEFORE drawing so a box flush against the last column keeps its border
+            // glyph (a trailing ClearToEol at the last column erases it on strict terminals — see Put).
+            sb.Append(Ansi.MoveTo(row, 1)).Append(Ansi.ClearToEol);
             var r = row - 1 - top;
             if (r < 0 || r >= boxH)
-            {
-                sb.Append(Ansi.ClearToEol);
                 continue;
-            }
 
             sb.Append(pad);
             if (r == 0)
@@ -47,7 +46,6 @@ public static class Overlay
                 sb.Append(Ansi.Dim).Append('│').Append(Ansi.Reset).Append(cell)
                   .Append(Ansi.Dim).Append('│').Append(Ansi.Reset);
             }
-            sb.Append(Ansi.ClearToEol);
         }
         return sb.ToString();
     }
