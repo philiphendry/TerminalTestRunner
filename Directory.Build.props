@@ -12,24 +12,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <IsPackable>false</IsPackable>
-
-    <!-- Modern SDKs resolve every package from the global packages folder; the implicit SDK
-         "NuGetFallbackFolder" is legacy and, in some host/CI environments, leaks a stale absolute
-         path into restore ("Unable to find fallback package folder ..."). Disabling it and clearing
-         restore fallback folders makes restore deterministic and portable. -->
-    <DisableImplicitNuGetFallbackFolder>true</DisableImplicitNuGetFallbackFolder>
-    <RestoreFallbackFolders>clear</RestoreFallbackFolders>
-    <!-- Serial restore: parallel restore workers in this environment race on config resolution and
-         intermittently write a wrong (host-drive) package folder into a project's assets. Serialising
-         restore makes every project resolve the same repo-local .packages folder deterministically. -->
-    <RestoreDisableParallel>true</RestoreDisableParallel>
-    <!-- Pin restore to THIS repo's NuGet.config only, ignoring the inherited config chain. Some host
-         environments expose a machine/user config that leaks absolute drive paths into restore; using
-         a single known config makes restore reproducible on every machine and in CI. -->
-    <RestoreConfigFile>$(MSBuildThisFileDirectory)NuGet.config</RestoreConfigFile>
-    <!-- Static-graph restore is the racy path in this environment; the classic single-project
-         evaluation resolves config deterministically. -->
-    <RestoreUseStaticGraphEvaluation>false</RestoreUseStaticGraphEvaluation>
   </PropertyGroup>
 
 </Project>
