@@ -6,5 +6,13 @@
   </PropertyGroup>
 
   <!-- ttr.Core has NO rendering/terminal/UI dependencies by design (CLAUDE.md invariant). -->
+  <!--
+    TtrParser is a zero-dependency leaf library (the file-reference parser). The reducer wires it
+    over incoming failure details at reduce time (brief M1), so Core references it. This is a
+    downward arrow — TtrParser is below Core — and carries no UI/terminal types.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../TtrParser/TtrParser.csproj" />
+  </ItemGroup>
 
 </Project>

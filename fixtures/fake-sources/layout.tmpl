@@ -1,0 +1,9 @@
+{{! Unrecognised-extension fixture (brief M1): opened plain by the 'o' modal, no highlighting. }}
+{{> header }}
+<main class="report">                      {{! line 3 — referenced by a fabricated frame }}
+  <h1>{{ title }}</h1>
+  {{#each tests}}
+  <section data-status="{{ status }}">{{ name }}</section>
+  {{/each}}
+</main>
+{{> footer }}

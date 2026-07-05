@@ -13,7 +13,7 @@ public sealed class CliOptions
         new("targets") { Description = "Zero or more .csproj/.sln/.slnx paths (or a --fake scenario name).", Arity = ArgumentArity.ZeroOrMore };
 
     public Option<bool> Fake { get; } =
-        new("--fake") { Description = "Run against the fake adapter. Scenario: default | big | flaky | slow." };
+        new("--fake") { Description = "Run against the fake adapter. Scenario: default | big | flaky | slow | files." };
 
     public Option<int> FakeSeed { get; } =
         new("--fake-seed") { Description = "Deterministic RNG seed for --fake." };

@@ -62,9 +62,8 @@ public static class ScenarioBuilder
             "slow" => Slow(rng),
             "flaky" => Grid(name, rng, nsCount: 3, classesPerNs: 4, methodsPerClass: 6,
                 pacing: new FakePacing(20, 40, 6, 25), durationScale: 1.0, includeTheory: true,
-                failChance: 0.30),
-            "files" => throw new NotSupportedException(
-                "The 'files' scenario is deferred to Phase 2 (needs the 'o' modal + fixture files)."),
+                failChance: 0.30) with { RerunPassProbability = 0.6 },
+            "files" => Files(),
             _ => Grid("default", rng, nsCount: 3, classesPerNs: 5, methodsPerClass: 20,
                 pacing: new FakePacing(25, 35, 8, 6), durationScale: 1.0, includeTheory: true),
         };
@@ -72,7 +71,7 @@ public static class ScenarioBuilder
 
     /// <summary>Is <paramref name="name"/> a scenario ttr can run this phase?</summary>
     public static bool IsKnown(string name) =>
-        name is "default" or "big" or "flaky" or "slow";
+        name is "default" or "big" or "flaky" or "slow" or "files";
 
     private static FakeScenario Grid(
         string name, Random rng, int nsCount, int classesPerNs, int methodsPerClass,
@@ -115,9 +114,11 @@ public static class ScenarioBuilder
             var seconds = 5 + rng.Next(0, 11); // 5..15
             var outcome = rng.NextDouble() < 0.2 ? TestOutcome.Failed : TestOutcome.Passed;
             var id = TestCaseId.ForCase(AdapterKind, Project, Tfm, $"{ns}.{cls}.SlowOperation_{i}", null);
+            var method = $"SlowOperation_TakesAbout_{seconds}s_{i}";
+            var detail = outcome == TestOutcome.Failed ? FakeFailures.Generic(ns, cls, method) : null;
             plans.Add(new FakePlan(
-                new TestIdentity(id, Project, Tfm, ns, cls, $"SlowOperation_TakesAbout_{seconds}s_{i}"),
-                outcome, TimeSpan.FromSeconds(seconds), DiscoverUpfront: true));
+                new TestIdentity(id, Project, Tfm, ns, cls, method),
+                outcome, TimeSpan.FromSeconds(seconds), DiscoverUpfront: true, detail));
         }
         for (var i = 0; i < 4; i++)
             plans.Add(MakePlan(ns, "QuickTests", $"FastCheck_{i}", null, rng, 0.1, 1.0, true));
@@ -126,6 +127,53 @@ public static class ScenarioBuilder
 
         // Launch all at once (StartIntervalMs 0) with room for every slow test to run in parallel.
         return new FakeScenario("slow", plans, new FakePacing(10, 30, 32, 0));
+    }
+
+    /// <summary>
+    /// The 'o'-modal scenario (brief M1): a small, deterministic tree whose failures embed absolute
+    /// paths into the committed <c>fixtures/fake-sources/</c> files — multiple refs per failure,
+    /// including a non-existent frame (dim/unresolved) and an <c>obj/…​.g.cs</c> frame (filtered).
+    /// Outcomes/durations are fixed (no RNG) so the snapshot suite is stable.
+    /// </summary>
+    private static FakeScenario Files()
+    {
+        const string calc = "Contoso.Sample.Calculations";
+        const string net = "Contoso.Sample.Networking";
+        var plans = new List<FakePlan>();
+
+        void Add(string ns, string cls, string method, TestOutcome outcome, int ms,
+            TestResultDetail? detail = null, string? caseDisplay = null, bool discover = true)
+        {
+            var id = TestCaseId.ForCase(AdapterKind, Project, Tfm, $"{ns}.{cls}.{method}", caseDisplay);
+            detail ??= outcome == TestOutcome.Failed ? FakeFailures.Generic(ns, cls, method) : null;
+            plans.Add(new FakePlan(
+                new TestIdentity(id, Project, Tfm, ns, cls, method, caseDisplay),
+                outcome, TimeSpan.FromMilliseconds(ms), discover, detail));
+        }
+
+        Add(calc, "CalculatorTests", "Add_ReturnsSum", TestOutcome.Failed, 12, FakeFailures.AssertWithFrames());
+        Add(calc, "CalculatorTests", "Subtract_ReturnsDifference", TestOutcome.Passed, 3);
+        Add(calc, "CalculatorTests", "Divide_ByZero_Throws", TestOutcome.Passed, 5);
+        Add(calc, "CalculatorTests", "Average_Empty_Throws", TestOutcome.Passed, 4);
+        Add(calc, "StringUtilitiesTests", "Format_Trims", TestOutcome.Passed, 2);
+        Add(calc, "StringUtilitiesTests", "Format_Null_IsSkipped", TestOutcome.Skipped, 1);
+
+        Add(net, "PaymentProcessorTests", "Charge_ValidCard", TestOutcome.Failed, 24, FakeFailures.MessageRefs());
+        Add(net, "PaymentProcessorTests", "Convert_SameCurrency_Identity", TestOutcome.Passed, 7);
+        Add(net, "PaymentProcessorTests", "RiskScore_HighAmount", TestOutcome.Passed, 9);
+        Add(net, "SettlementTests", "Settle_Empty_Throws", TestOutcome.Failed, 15, FakeFailures.DeepAndUnrecognised());
+        Add(net, "SettlementTests", "Settle_GroupsByCurrency", TestOutcome.Passed, 11);
+
+        // A theory whose Case rows appear ONLY via run events; the last row fails with fixture refs.
+        (string Row, TestOutcome Outcome)[] rows =
+            [("a=1,b=1", TestOutcome.Passed), ("a=2,b=2", TestOutcome.Passed), ("a=20,b=22", TestOutcome.Failed)];
+        foreach (var (row, outcome) in rows)
+        {
+            var detail = outcome == TestOutcome.Failed ? FakeFailures.AssertWithFrames() : null;
+            Add(calc, "CalculatorTests", "Add_Theory", outcome, 8, detail, caseDisplay: row, discover: false);
+        }
+
+        return new FakeScenario("files", plans, new FakePacing(6, 25, 8, 8));
     }
 
     /// <summary>A theory whose Case children are announced ONLY via run events (the 1→N shape).</summary>
@@ -139,9 +187,10 @@ public static class ScenarioBuilder
             var id = TestCaseId.ForCase(AdapterKind, Project, Tfm, $"{ns}.{cls}.{method}", row);
             var outcome = Roll(rng, failChance);
             var ms = 20 + rng.Next(0, 180);
+            var detail = outcome == TestOutcome.Failed ? FakeFailures.Generic(ns, cls, method) : null;
             plans.Add(new FakePlan(
                 new TestIdentity(id, Project, Tfm, ns, cls, method, CaseDisplay: row),
-                outcome, Scale(ms, durationScale), DiscoverUpfront: false)); // <-- appears mid-run only
+                outcome, Scale(ms, durationScale), DiscoverUpfront: false, detail)); // <-- appears mid-run only
         }
     }
 
@@ -153,9 +202,10 @@ public static class ScenarioBuilder
         var id = TestCaseId.ForCase(AdapterKind, Project, Tfm, fqn, caseDisplay);
         var outcome = Roll(rng, failChance);
         var ms = 5 + rng.Next(0, 220);
+        var detail = outcome == TestOutcome.Failed ? FakeFailures.Generic(ns, cls, method) : null;
         return new FakePlan(
             new TestIdentity(id, Project, Tfm, ns, cls, method, caseDisplay),
-            outcome, Scale(ms, durationScale), discover);
+            outcome, Scale(ms, durationScale), discover, detail);
     }
 
     private static string MethodName(Random rng, int n, int c, int m)

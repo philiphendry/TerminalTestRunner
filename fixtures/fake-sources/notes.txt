@@ -1,0 +1,11 @@
+Contoso.Sample — configuration schema notes
+============================================
+
+network.endpoint : required, absolute https URI
+network.retries  : optional, integer 0..10 (default 3)
+network.timeout  : optional, seconds (NOT YET SUPPORTED — see failing test)
+cache.sizeMb     : optional, integer >= 16
+cache.evictionPolicy : one of { lru, lfu, fifo }
+
+The `network.timeout` key is referenced by a fabricated failure in the fake
+`files` scenario to exercise message-embedded file references in the 'o' modal.

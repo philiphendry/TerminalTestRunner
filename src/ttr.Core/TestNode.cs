@@ -30,6 +30,26 @@ public sealed class TestNode
     /// <summary>Own duration for leaves.</summary>
     public TimeSpan Duration { get; set; }
 
+    /// <summary>Rich outcome detail for a finished leaf (message/exception/stack/stdout); null until it finishes.</summary>
+    public TestResultDetail? Detail { get; set; }
+
+    /// <summary>
+    /// Ordered file references parsed from <see cref="Detail"/> by the reducer (brief M1). Includes
+    /// unresolved refs (<c>Exists == false</c>) in order so the 'o' modal can traverse and dim them.
+    /// </summary>
+    public IReadOnlyList<TtrParser.FileRef> FileRefs { get; set; } = [];
+
+    /// <summary>True when this leaf has at least one file reference that resolved to an existing file.</summary>
+    public bool HasResolvedRefs
+    {
+        get
+        {
+            foreach (var r in FileRefs)
+                if (r.Exists) return true;
+            return false;
+        }
+    }
+
     /// <summary>Per-status leaf counts of this subtree (index by <see cref="TestStatus"/>).</summary>
     public int[] Counts { get; } = new int[7];
 

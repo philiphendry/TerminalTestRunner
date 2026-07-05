@@ -13,12 +13,19 @@ public abstract record AppEvent
     /// <summary>A test began executing. Carries full identity so mid-run theory cases can be inserted.</summary>
     public sealed record TestStarted(TestIdentity Test) : AppEvent;
 
-    /// <summary>A test finished with an outcome + duration (and optional message, unused in Phase 1 UI).</summary>
-    public sealed record TestFinished(TestIdentity Test, TestOutcome Outcome, TimeSpan Duration, string? Message = null)
+    /// <summary>A test finished with an outcome, duration, and (for failures) rich result detail.</summary>
+    public sealed record TestFinished(
+        TestIdentity Test, TestOutcome Outcome, TimeSpan Duration, TestResultDetail? Detail = null)
         : AppEvent;
 
     /// <summary>The run finished. The reducer sweeps any still-Running leaves to NotRun (no phantom spinners).</summary>
     public sealed record RunCompleted : AppEvent;
+
+    /// <summary>Off-thread syntax highlighting for the open 'o' modal is ready (plan §11.5).</summary>
+    public sealed record HighlightReady(string FilePath, IReadOnlyList<string> AnsiLines) : AppEvent;
+
+    /// <summary>A transient toast's lifetime elapsed; the reducer clears it iff the id still matches.</summary>
+    public sealed record ToastExpired(long Id) : AppEvent;
 
     /// <summary>A key was read on the input thread.</summary>
     public sealed record KeyPressed(ConsoleKeyInfo Key) : AppEvent;

@@ -80,6 +80,7 @@ public static class Reducer
             _ => TestStatus.Skipped,
         });
         SetDuration(leaf, t.Duration);
+        AttachDetail(leaf, t.Detail);
         var next = s with
         {
             Expanded = expanded.ToImmutable(),
@@ -317,6 +318,21 @@ public static class Reducer
             n.Counts[(int)next]++;
         }
         leaf.Status = next;
+    }
+
+    /// <summary>
+    /// Store the finished leaf's detail and derive its ordered file references via TtrParser (brief M1).
+    /// A pass/skip clears any stale failure detail (so vanish-on-pass and the detail pane stay honest).
+    /// The parser's existence check touches the filesystem — a deliberate, bounded reduce-time read
+    /// documented in docs/phase-2-notes.md. Relative paths resolve against CWD until real adapters
+    /// (Phase 3) supply per-project directories; the Fake adapter embeds absolute paths.
+    /// </summary>
+    private static void AttachDetail(TestNode leaf, TestResultDetail? detail)
+    {
+        leaf.Detail = detail;
+        leaf.FileRefs = detail is null || detail.IsEmpty
+            ? []
+            : TtrParser.FileReferenceParser.Parse(detail.Message, detail.StackTrace, projectDir: "");
     }
 
     private static void SetDuration(TestNode leaf, TimeSpan duration)

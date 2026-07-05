@@ -9,4 +9,18 @@
     <ProjectReference Include="../ttr.Core/ttr.Core.csproj" />
   </ItemGroup>
 
+  <!--
+    The fake `files` scenario embeds absolute paths to these committed sources into its failure
+    stack traces so the 'o' modal has real, existing files to open (plan §6.5 / brief M1). They
+    are copied to the build output under fake-sources/ and resolved at runtime via
+    AppContext.BaseDirectory; CopyToOutputDirectory content flows to referencing projects
+    (ttr.Cli, ttr.Tests) too, so the same absolute paths exist wherever ttr.Runners runs.
+  -->
+  <ItemGroup>
+    <Content Include="../../fixtures/fake-sources/**/*">
+      <Link>fake-sources/%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

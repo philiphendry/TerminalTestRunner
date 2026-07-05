@@ -1,0 +1,11 @@
+{
+  "service": "Contoso.Sample",
+  "network": {
+    "endpoint": "https://api.contoso.example/v2",
+    "retries": 3
+  },
+  "cache": {
+    "sizeMb": 128,
+    "evictionPolicy": "lru"
+  }
+}

@@ -14,8 +14,20 @@ public sealed class FakeAdapter : ITestSessionAdapter
 {
     private readonly FakeScenario _scenario;
 
+    // Rerun bookkeeping (brief M1/M4): the first RunAsync is the initial run (planned outcomes);
+    // later calls are reruns, where a currently-failed test flips to Passed with the scenario's
+    // RerunPassProbability. Seeded for determinism; mutated only on the single launch loop.
+    private readonly Random _rerunRng;
+    private readonly Dictionary<TestCaseId, TestOutcome> _outcomes = new();
+    private int _runCount;
+
     public FakeAdapter(string scenarioName, int seed)
-        => _scenario = ScenarioBuilder.Build(scenarioName, seed);
+    {
+        _scenario = ScenarioBuilder.Build(scenarioName, seed);
+        _rerunRng = new Random(seed);
+        foreach (var plan in _scenario.Plans)
+            _outcomes[plan.Identity.Id] = plan.Outcome;
+    }
 
     /// <summary>The built scenario (exposed for tests and the CLI header).</summary>
     public FakeScenario Scenario => _scenario;
@@ -43,6 +55,7 @@ public sealed class FakeAdapter : ITestSessionAdapter
         TestTarget target, IReadOnlyList<TestCaseId> subset, ChannelWriter<AppEvent> events, CancellationToken ct)
     {
         var p = _scenario.Pacing;
+        var isRerun = Interlocked.Increment(ref _runCount) > 1;
         var selected = subset.Count == 0
             ? _scenario.Plans
             : _scenario.Plans.Where(pl => subset.Contains(pl.Identity.Id)).ToList();
@@ -57,7 +70,7 @@ public sealed class FakeAdapter : ITestSessionAdapter
                 if (p.StartIntervalMs > 0)
                     await Task.Delay(p.StartIntervalMs, ct).ConfigureAwait(false);
                 await gate.WaitAsync(ct).ConfigureAwait(false);
-                running.Add(RunOne(plan, gate, events, ct));
+                running.Add(RunOne(plan, EffectiveOutcome(plan, isRerun), gate, events, ct));
             }
 
             await Task.WhenAll(running).ConfigureAwait(false);
@@ -70,14 +83,32 @@ public sealed class FakeAdapter : ITestSessionAdapter
         }
     }
 
+    /// <summary>Outcome for this run: planned on the initial run; on a rerun, a failed test flips to
+    /// Passed with the scenario's <see cref="FakeScenario.RerunPassProbability"/> (the vanish-on-pass loop).</summary>
+    private TestOutcome EffectiveOutcome(FakePlan plan, bool isRerun)
+    {
+        if (!isRerun) return plan.Outcome;
+        var current = _outcomes.GetValueOrDefault(plan.Identity.Id, plan.Outcome);
+        if (current == TestOutcome.Failed
+            && _scenario.RerunPassProbability > 0
+            && _rerunRng.NextDouble() < _scenario.RerunPassProbability)
+        {
+            current = TestOutcome.Passed;
+        }
+        _outcomes[plan.Identity.Id] = current;
+        return current;
+    }
+
     private static async Task RunOne(
-        FakePlan plan, SemaphoreSlim gate, ChannelWriter<AppEvent> events, CancellationToken ct)
+        FakePlan plan, TestOutcome outcome, SemaphoreSlim gate,
+        ChannelWriter<AppEvent> events, CancellationToken ct)
     {
         try
         {
             events.TryWrite(new AppEvent.TestStarted(plan.Identity));
             await Task.Delay(plan.Duration, ct).ConfigureAwait(false);
-            events.TryWrite(new AppEvent.TestFinished(plan.Identity, plan.Outcome, plan.Duration));
+            var detail = outcome == TestOutcome.Failed ? plan.Detail : null;
+            events.TryWrite(new AppEvent.TestFinished(plan.Identity, outcome, plan.Duration, detail));
         }
         catch (OperationCanceledException)
         {
