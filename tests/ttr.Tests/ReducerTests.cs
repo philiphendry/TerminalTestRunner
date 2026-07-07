@@ -83,6 +83,40 @@ public class ReducerTests
     }
 
     [Fact]
+    public void A_single_row_stays_folded_into_the_method_leaf_no_redundant_child()
+    {
+        // Many frameworks (MSTest / NUnit / a custom [Fact] display) give a plain test a run-time display
+        // that differs from its FQN, so the adapter tags it with a case display. A LONE such row must NOT
+        // grow a child that duplicates the method name — the 1→N split needs N≥2 (bug: "1o … same name again").
+        var only = Id("N", "C", "PlainTest", "PlainTest");   // display == method name (the reported symptom)
+        var s = Feed(Fresh(),
+            new AppEvent.TestStarted(only),
+            new AppEvent.TestFinished(only, TestOutcome.Passed, TimeSpan.FromMilliseconds(2)));
+
+        var method = s.Root.Children[0].Children[0].Children[0].Children[0].Children[0];
+        Assert.Equal(TestNodeKind.Method, method.Kind);
+        Assert.True(method.IsLeaf);                 // folded — no child
+        Assert.Equal("PlainTest", method.Name);     // shows the method name, not a duplicated row
+        Assert.Equal(1, s.Root.TotalLeaves);
+        Assert.Equal(1, s.Root.Passed);
+        Assert.Equal(TimeSpan.FromMilliseconds(2), s.Root.RollupDuration);
+    }
+
+    [Fact]
+    public void A_discovered_single_row_also_stays_folded()
+    {
+        // The same fold applies when the lone row arrives at DISCOVERY (a pre-enumerated theory with one row,
+        // or a plain test the adapter tagged with a case display).
+        var s = Discover(Fresh(), Id("N", "C", "OneRow", "the only row"));
+
+        var method = s.Root.Children[0].Children[0].Children[0].Children[0].Children[0];
+        Assert.Equal(TestNodeKind.Method, method.Kind);
+        Assert.True(method.IsLeaf);
+        Assert.Equal(1, s.Root.TotalLeaves);
+        Assert.Equal(1, s.Root.NotRun);
+    }
+
+    [Fact]
     public void Selection_survives_tree_changes()
     {
         var keep = Id("N", "C", "Keeper");

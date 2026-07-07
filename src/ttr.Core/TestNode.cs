@@ -103,6 +103,15 @@ public sealed class TestNode
     public bool IsStale => IsLeaf && StaleLeaves > 0;
 
     /// <summary>
+    /// When this Method node is a LEAF that currently represents exactly one theory row (its id + display),
+    /// non-null. The 1→N theory split is DEFERRED: a lone row stays folded into the Method leaf — so a plain
+    /// test whose framework display merely differs from its FQN never grows a redundant single child that
+    /// duplicates the method name. It splits into Case children only when a SECOND distinct row materialises
+    /// (see the reducer's <c>SplitFoldedLeaf</c>). Null for plain tests, for branches, and for non-Method nodes.
+    /// </summary>
+    public (TestCaseId Id, string Display)? FoldedCase { get; set; }
+
+    /// <summary>
     /// A restored (<c>--continue</c>) leaf whose rich detail lives on disk (results/&lt;runId&gt;/details.jsonl)
     /// and has not been lazily loaded yet (brief M5). <see cref="Detail"/> stays null until the detail pane / 'o'
     /// asks for it; loading it (or any real run) clears this flag. Never preloaded (POC-8 bar).

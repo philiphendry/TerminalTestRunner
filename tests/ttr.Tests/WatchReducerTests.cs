@@ -122,16 +122,18 @@ public class WatchReducerTests
     [Fact]
     public void Rediscovery_keeps_a_run_materialised_theory_when_the_method_is_rediscovered_as_a_plain_leaf()
     {
-        // Model the VSTest non-serialisable theory: discovered as one Method leaf, then a run promotes it to
-        // a branch with a Case child. A re-discovery re-supplies only the Method (display == FQN) — its
-        // already-materialised rows must survive (they'll re-run in the auto-rerun), not be swept.
+        // Model the VSTest non-serialisable theory: discovered as one Method leaf, then a run reveals MULTIPLE
+        // rows that split it into a branch with Case children (the 1→N split needs N≥2). A re-discovery
+        // re-supplies only the Method (display == FQN) — its already-materialised rows must survive (they'll
+        // re-run in the auto-rerun), not be swept.
         var s = Setup("Theory");
-        var row = Id("N", "C", "Theory", "row1");
-        s = Reducer.Reduce(s, new AppEvent.TestStarted(row));
-        s = Reducer.Reduce(s, new AppEvent.TestFinished(row, TestOutcome.Passed, TimeSpan.FromMilliseconds(1)));
+        var row1 = Id("N", "C", "Theory", "row1");
+        var row2 = Id("N", "C", "Theory", "row2");
+        s = Reducer.Reduce(s, new AppEvent.TestFinished(row1, TestOutcome.Passed, TimeSpan.FromMilliseconds(1)));
+        s = Reducer.Reduce(s, new AppEvent.TestFinished(row2, TestOutcome.Passed, TimeSpan.FromMilliseconds(1)));
         var theory = Find(s.Root, "Theory")!;
         Assert.False(theory.IsLeaf);
-        Assert.Single(theory.Children);
+        Assert.Equal(2, theory.Children.Count);
 
         s = Feed(s, new AppEvent.RediscoveryStarted([Proj]));
         s = Discover(s, Id("N", "C", "Theory"));   // plain Method leaf, as VSTest re-discovers it
@@ -139,7 +141,7 @@ public class WatchReducerTests
 
         theory = Find(s.Root, "Theory")!;
         Assert.False(theory.IsLeaf);               // still a branch
-        Assert.Single(theory.Children);            // the row survived
+        Assert.Equal(2, theory.Children.Count);    // the rows survived
     }
 
     // --- Auto-rerun request -----------------------------------------------------

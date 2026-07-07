@@ -78,8 +78,13 @@ public static class Reducer
         var structural = false;
         var expanded = s.Expanded.ToBuilder();
         var leaf = EnsureLeaf(s.Root, t.Test, expanded, ref structural);
-        SetStale(leaf, false);   // a real run replaces staleness with reality (plan §10)
-        ApplyStatus(leaf, TestStatus.Running);
+        // A base-FQN event addressing a method that folded a single row (or split into a branch) must not
+        // drive that row's status — the same no-op the branch guards already give (ApplyStatus no-ops branches).
+        if (t.Test.IsCase || leaf.FoldedCase is null)
+        {
+            SetStale(leaf, false);   // a real run replaces staleness with reality (plan §10)
+            ApplyStatus(leaf, TestStatus.Running);
+        }
         var next = s with
         {
             Running = true,
@@ -94,16 +99,21 @@ public static class Reducer
         var structural = false;
         var expanded = s.Expanded.ToBuilder();
         var leaf = EnsureLeaf(s.Root, t.Test, expanded, ref structural);
-        SetStale(leaf, false);   // fresh result replaces any staleness (plan §10)
-        leaf.HasRestoredDetail = false;
-        ApplyStatus(leaf, t.Outcome switch
+        // A base-FQN result addressing a method that folded a single row (or split into a branch) is a no-op
+        // on the row — mirror the branch guards so a late ActiveTests-style base event never corrupts it.
+        if (t.Test.IsCase || leaf.FoldedCase is null)
         {
-            TestOutcome.Passed => TestStatus.Passed,
-            TestOutcome.Failed => TestStatus.Failed,
-            _ => TestStatus.Skipped,
-        });
-        SetDuration(leaf, t.Duration);
-        AttachDetail(leaf, t.Detail);
+            SetStale(leaf, false);   // fresh result replaces any staleness (plan §10)
+            leaf.HasRestoredDetail = false;
+            ApplyStatus(leaf, t.Outcome switch
+            {
+                TestOutcome.Passed => TestStatus.Passed,
+                TestOutcome.Failed => TestStatus.Failed,
+                _ => TestStatus.Skipped,
+            });
+            SetDuration(leaf, t.Duration);
+            AttachDetail(leaf, t.Detail);
+        }
 
         // Under the failed-only filter a pass changes which rows are visible (vanish-on-pass), so the
         // published snapshot must be rebuilt even when the tree structure did not change (brief M3).
@@ -875,37 +885,75 @@ public static class Reducer
 
         if (!id.IsCase)
         {
-            // Plain test: the Method node IS the leaf, keyed on the derived id.
+            // Plain test: the Method node IS the leaf, keyed on the derived id. (A base-FQN run event on a
+            // method that has since folded/split resolves here too — the reducer's status guards no-op it.)
             return EnsureLeafNode(cls, id.Method, TestNodeKind.Method, id.Id, id.Method, ref structural);
         }
 
-        // Theory: Method is a branch; each row is a Case leaf (the 1→N shape, incl. mid-run inserts).
-        var method = EnsureMethodBranch(cls, id, expanded, ref structural);
-        // Key the Case leaf on the derived id (CLAUDE.md invariant 7), not the display: some frameworks
-        // (xUnit v3 at MTP discovery) give data rows an identical display-name, and keying on that would
-        // collapse distinct rows into one node. The display stays the human label.
+        // A theory row. The 1→N split is DEFERRED: the Method becomes a branch only once a SECOND distinct
+        // row materialises. A lone row stays folded into the Method leaf, so a plain test whose framework
+        // display merely differs from the FQN never shows a redundant single child duplicating its own name.
+        var method = cls.FindChild(id.Method);
+        if (method is null)
+        {
+            // First sighting of this method, via a row: fold the row into the Method leaf.
+            var folded = EnsureLeafNode(cls, id.Method, TestNodeKind.Method, id.Id, id.Method, ref structural);
+            folded.FoldedCase = (id.Id, id.CaseDisplay!);
+            return folded;
+        }
+        if (method.IsLeaf)
+        {
+            if (method.FoldedCase is not { } fc)
+            {
+                // A plain Method leaf (a plain test, or a non-serialisable theory's placeholder discovered as
+                // one case with display == FQN) adopts this first row in place — still one entity, still a leaf.
+                method.FoldedCase = (id.Id, id.CaseDisplay!);
+                return method;
+            }
+            if (fc.Id == id.Id) return method;   // the same row again (e.g. started → finished)
+            // A genuine second, distinct row: NOW split the folded leaf into a branch (N≥2).
+            SplitFoldedLeaf(method, fc);
+            structural = true;
+        }
+        // The Method is a branch: each row is its own Case leaf, keyed on the derived id (CLAUDE.md
+        // invariant 7), not the display — some frameworks (xUnit v3 at MTP discovery) give data rows an
+        // identical display-name, and keying on that would collapse distinct rows into one node.
         return EnsureLeafNode(method, id.Id.Value, TestNodeKind.Case, id.Id, id.CaseDisplay!, ref structural);
     }
 
-    /// <summary>Resolve the Method branch for a theory row, promoting a Method that was materialised as a
-    /// plain-test LEAF (a non-serialisable theory that discovered as one case, display == FQN) into a branch:
-    /// its own leaf contribution is removed from the rollups so the Case children count once — the live 1→N
-    /// shape (brief M2/AC4). A Method created fresh here (or already a branch) needs no demotion.</summary>
-    private static TestNode EnsureMethodBranch(
-        TestNode cls, TestIdentity id, ImmutableHashSet<TestCaseId>.Builder expanded, ref bool structural)
+    /// <summary>Promote a Method leaf that held a single folded theory row into a branch: the held row becomes
+    /// its first Case child, INHERITING the leaf's own result and rollups. The Method node keeps its counters
+    /// (they already count that one leaf — now the child) and merely sheds its own leaf-display state, so it
+    /// reads purely as a branch. Called only when a SECOND distinct row arrives — the deferred 1→N split so a
+    /// lone row never grows a redundant single child (brief M2/AC4).</summary>
+    private static void SplitFoldedLeaf(TestNode method, (TestCaseId Id, string Display) held)
     {
-        var existing = cls.FindChild(id.Method);
-        if (existing is null)
-            return EnsureBranch(cls, id.Method, TestNodeKind.Method,
-                TestCaseId.ForBranch(TestNodeKind.Method, id.Project, id.Tfm, id.Namespace, id.ClassName, id.Method),
-                id.Method, expanded, ref structural);
-
-        if (existing.IsLeaf && existing.TotalLeaves > 0)
+        var child = new TestNode
         {
-            RemoveLeafFromRollups(existing);
-            structural = true;   // a leaf became a branch — the flattened row set changes
-        }
-        return existing;
+            Id = held.Id,
+            Kind = TestNodeKind.Case,
+            Name = held.Display,
+            Parent = method,
+            Status = method.Status,
+            Duration = method.Duration,
+            Detail = method.Detail,
+            FileRefs = method.FileRefs,
+            HasRestoredDetail = method.HasRestoredDetail,
+            TotalLeaves = method.TotalLeaves,
+            RollupDuration = method.RollupDuration,
+            StaleLeaves = method.StaleLeaves,
+        };
+        Array.Copy(method.Counts, child.Counts, method.Counts.Length);
+        method.AddChild(held.Id.Value, child);
+
+        // The method's own counters are untouched (they now describe the one child); clear only its
+        // leaf-display fields and the fold marker so nothing double-counts and it renders as a branch.
+        method.FoldedCase = null;
+        method.Status = TestStatus.NotRun;
+        method.Duration = TimeSpan.Zero;
+        method.Detail = null;
+        method.FileRefs = [];
+        method.HasRestoredDetail = false;
     }
 
     private static TestNode EnsureBranch(
@@ -943,24 +991,6 @@ public static class Reducer
             n.Counts[(int)TestStatus.NotRun]++;
             n.TotalLeaves++;
         }
-    }
-
-    /// <summary>Remove a former leaf's own contribution from every ancestor's rollups (and its own), so a
-    /// Method that turns out to be a theory branch stops being counted as a test itself (the 1→N promotion).</summary>
-    private static void RemoveLeafFromRollups(TestNode formerLeaf)
-    {
-        var status = formerLeaf.Status;
-        var dur = formerLeaf.Duration;
-        for (TestNode? n = formerLeaf; n is not null; n = n.Parent)
-        {
-            n.Counts[(int)status]--;
-            n.TotalLeaves--;
-            n.RollupDuration -= dur;
-        }
-        formerLeaf.Status = TestStatus.NotRun;
-        formerLeaf.Duration = TimeSpan.Zero;
-        formerLeaf.Detail = null;
-        formerLeaf.FileRefs = [];
     }
 
     /// <summary>Transition a leaf, propagating the count delta up the ancestor chain. A no-op on a branch —
