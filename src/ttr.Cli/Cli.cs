@@ -78,6 +78,10 @@ public static class Cli
             if (targets.Count == 0) return 0;   // user cancelled the picker
         }
 
+        // This whole method runs before the TUI takes the terminal (App.RunReal enters the alt screen
+        // only once it returns), so it's the one place a silent multi-second stall can happen on a large
+        // target set — print status here rather than leaving the terminal looking hung.
+        Console.Error.WriteLine("Resolving targets...");
         var resolution = await TargetResolver.ResolveAsync(targets).ConfigureAwait(false);
         if (resolution.Kind != TargetOutcomeKind.Resolved)
         {
@@ -96,6 +100,7 @@ public static class Cli
             : Path.Combine(Path.GetDirectoryName(resolved.PrimaryTargetPath ?? ".") ?? ".", ".ttr");
         var config = TtrConfig.Load(stateDir);
         var evaluator = new EvaluationService();
+        Console.Error.WriteLine($"Evaluating {resolved.ProjectPaths.Count} project(s)...");
         var evaluations = EvaluateAll(evaluator, config, resolved.ProjectPaths);
 
         // --tfm (M1): filter every evaluation to the single requested TFM. A project with no matching TFM
@@ -267,16 +272,23 @@ public static class Cli
         e.Tfms.Any(t => t.Detection.Runner is RunnerKind.VsTest or RunnerKind.Mtp or RunnerKind.Unknown);
 
     /// <summary>Evaluate each project per-TFM (§6.2). Honours a per-project override from
-    /// <c>.ttr/config.json</c>. Best-effort: a project that fails to evaluate is skipped with a stderr note.</summary>
+    /// <c>.ttr/config.json</c>. Best-effort: a project that fails to evaluate is skipped with a stderr note.
+    /// Each project gets its own <see cref="Microsoft.Build.Evaluation.ProjectCollection"/> (see
+    /// <c>EvaluationService</c>), so evaluations are independent — run them in parallel (bounded by core
+    /// count) rather than one at a time, since this whole method runs before the TUI ever appears and a
+    /// large target set otherwise reads as a multi-second hang.</summary>
     private static IReadOnlyList<ProjectEvaluation> EvaluateAll(
         EvaluationService service, TtrConfig config, IReadOnlyList<string> projectPaths)
     {
-        var results = new List<ProjectEvaluation>(projectPaths.Count);
-        foreach (var path in projectPaths)
-        {
-            try { results.Add(service.Evaluate(path, config.OverrideFor(path))); }
-            catch (Exception ex) { Console.Error.WriteLine($"warning: could not evaluate {Path.GetFileName(path)}: {ex.Message}"); }
-        }
-        return results;
+        var results = new ProjectEvaluation?[projectPaths.Count];
+        Parallel.For(0, projectPaths.Count,
+            new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount },
+            i =>
+            {
+                var path = projectPaths[i];
+                try { results[i] = service.Evaluate(path, config.OverrideFor(path)); }
+                catch (Exception ex) { Console.Error.WriteLine($"warning: could not evaluate {Path.GetFileName(path)}: {ex.Message}"); }
+            });
+        return results.Where(r => r is not null).Select(r => r!).ToList();
     }
 }
