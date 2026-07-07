@@ -10,8 +10,8 @@ namespace Ttr.Cli;
 /// <see cref="AppEvent"/> stream the Fake adapter produces (the backend is invisible behind the event stream).
 /// <see cref="DiscoverAsync"/> registers evaluated projects (§6.2), raises phantom/unparseable notices (§4),
 /// builds stale projects in parallel (§7), and streams discovered tests — VSTest via a persistent
-/// <see cref="VsTestDiscoverer"/> (§6.3) and MTP via one long-lived <see cref="MtpSession"/> per (project, TFM)
-/// (§6.4), keeping those adapters ALIVE. <see cref="RunAsync"/> (Phase 4) routes a subset to the owning
+/// <see cref="VsTestDiscoverer"/> (§6.3) and MTP via one long-lived <see cref="MtpSession"/> per (project, TFM),
+/// discovered in parallel capped at logical-CPU/2 sessions (§6.4), keeping those adapters ALIVE. <see cref="RunAsync"/> (Phase 4) routes a subset to the owning
 /// adapters, rebuilding stale projects first (restarting their MTP host on a rebuild — staleness ⇒ new
 /// process), fanning the per-adapter runs out concurrently and merging their streams, then emitting one
 /// <see cref="AppEvent.RunCompleted"/>. A single gate serialises discovery and runs so the shared vstest
@@ -29,6 +29,9 @@ public sealed class RealBackend : ITestSessionAdapter
     private readonly EvaluationService? _evaluator;
     private readonly TtrConfig? _config;
     private readonly string? _tfmFilter;
+
+    /// <summary>Cap on concurrent MTP discovery sessions (plan §6.4: logical-CPU/2).</summary>
+    private static readonly int MtpDiscoveryConcurrency = Math.Max(1, Environment.ProcessorCount / 2);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<ProjectEvaluation> _registered = [];
@@ -360,44 +363,70 @@ public sealed class RealBackend : ITestSessionAdapter
             }
         }
 
-        // MTP discovery — one long-lived host per (project, TFM).
-        foreach (var (proj, tfm) in mtpTargets)
+        // MTP discovery — one long-lived host per (project, TFM), fanned out in parallel and capped at
+        // logical-CPU/2 concurrent sessions (plan §6.4) so a large solution doesn't launch every MTP host
+        // at once. `_mtpSessions` is mutated from multiple targets concurrently, so all access to it below
+        // is guarded by `sessionsLock` (Dictionary<> is not safe for concurrent structural changes even
+        // across distinct keys).
+        if (mtpTargets.Count > 0)
         {
-            var key = SessionKey(proj.ProjectPath, tfm.Tfm);
-            if (rediscover && _mtpSessions.TryGetValue(key, out var old))
-            {
-                await old.DisposeAsync().ConfigureAwait(false);   // staleness ⇒ rebuild ⇒ new process
-                _mtpSessions.Remove(key);
-            }
-            if (_mtpSessions.ContainsKey(key)) continue;   // already discovered and alive
+            var sessionsLock = new object();
+            using var throttle = new SemaphoreSlim(MtpDiscoveryConcurrency);
 
-            var multiTfm = proj.TfmMonikers.Count > 1;
-            var session = new MtpSession(proj.ProjectPath, tfm.OutputAssemblyPath, tfm.Tfm, multiTfm ? tfm.Tfm : null);
-            // A single MTP host's failure must not sink the whole backend — surface it as a notice and
-            // keep discovering the other projects (Phase 3 had this guard in the static discover path).
-            try
+            await Task.WhenAll(mtpTargets.Select(async target =>
             {
-                _diag?.Adapter($"mtp start {proj.DisplayName} ({tfm.Tfm})");
-                if (await session.StartAsync(events, ct).ConfigureAwait(false))
+                var (proj, tfm) = target;
+                await throttle.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) handshake serverInfo.version={session.ServerVersion ?? "?"}");
-                    await session.DiscoverAsync(events, ct).ConfigureAwait(false);
-                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) discovery complete");
-                    _mtpSessions[key] = session;
+                    var key = SessionKey(proj.ProjectPath, tfm.Tfm);
+                    MtpSession? old = null;
+                    if (rediscover)
+                        lock (sessionsLock)
+                        {
+                            if (_mtpSessions.TryGetValue(key, out old))
+                                _mtpSessions.Remove(key);
+                        }
+                    if (old is not null)
+                        await old.DisposeAsync().ConfigureAwait(false);   // staleness ⇒ rebuild ⇒ new process
+
+                    bool alreadyAlive;
+                    lock (sessionsLock) { alreadyAlive = _mtpSessions.ContainsKey(key); }
+                    if (alreadyAlive) return;   // already discovered and alive
+
+                    var multiTfm = proj.TfmMonikers.Count > 1;
+                    var session = new MtpSession(proj.ProjectPath, tfm.OutputAssemblyPath, tfm.Tfm, multiTfm ? tfm.Tfm : null);
+                    // A single MTP host's failure must not sink the whole backend — surface it as a notice and
+                    // keep discovering the other projects (Phase 3 had this guard in the static discover path).
+                    try
+                    {
+                        _diag?.Adapter($"mtp start {proj.DisplayName} ({tfm.Tfm})");
+                        if (await session.StartAsync(events, ct).ConfigureAwait(false))
+                        {
+                            _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) handshake serverInfo.version={session.ServerVersion ?? "?"}");
+                            await session.DiscoverAsync(events, ct).ConfigureAwait(false);
+                            _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) discovery complete");
+                            lock (sessionsLock) { _mtpSessions[key] = session; }
+                        }
+                        else
+                        {
+                            _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) failed to hand shake — no host");
+                            await session.DisposeAsync().ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) { await session.DisposeAsync().ConfigureAwait(false); throw; }
+                    catch (Exception ex)
+                    {
+                        events.TryWrite(new AppEvent.DiscoveryFailed(proj.ProjectPath, multiTfm ? tfm.Tfm : null,
+                            new NodeNotice(NoticeSeverity.Error, "MTP discovery failed", ex.Message)));
+                        await session.DisposeAsync().ConfigureAwait(false);
+                    }
                 }
-                else
+                finally
                 {
-                    _diag?.Adapter($"mtp {proj.DisplayName} ({tfm.Tfm}) failed to hand shake — no host");
-                    await session.DisposeAsync().ConfigureAwait(false);
+                    throttle.Release();
                 }
-            }
-            catch (OperationCanceledException) { await session.DisposeAsync().ConfigureAwait(false); throw; }
-            catch (Exception ex)
-            {
-                events.TryWrite(new AppEvent.DiscoveryFailed(proj.ProjectPath, multiTfm ? tfm.Tfm : null,
-                    new NodeNotice(NoticeSeverity.Error, "MTP discovery failed", ex.Message)));
-                await session.DisposeAsync().ConfigureAwait(false);
-            }
+            })).ConfigureAwait(false);
         }
     }
 
