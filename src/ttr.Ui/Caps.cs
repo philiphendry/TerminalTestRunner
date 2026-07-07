@@ -33,7 +33,7 @@ public sealed partial record Caps(bool Unicode, bool Color)
     // the spinner still animates (the brief illustrated the ASCII spinner as `*`; a static glyph wouldn't spin).
     private static readonly Dictionary<char, char> AsciiGlyphs = new()
     {
-        ['✓'] = '+', ['✗'] = 'x', ['○'] = 'o', ['⊘'] = 's', ['◌'] = '.', ['◍'] = '*',
+        ['✓'] = '+', ['✗'] = 'x', ['○'] = 'o', ['⊘'] = 's', ['⧗'] = 'h', ['◍'] = '*',
         ['⚠'] = '!', ['✖'] = 'X',
         ['┌'] = '+', ['┐'] = '+', ['└'] = '+', ['┘'] = '+', ['─'] = '-', ['│'] = '|',
         ['↑'] = '^', ['↓'] = 'v', ['←'] = '<', ['→'] = '>', ['↔'] = '-',

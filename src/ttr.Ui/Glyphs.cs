@@ -13,7 +13,10 @@ public static class Glyphs
     public const string Failed = "✗";
     public const string NotRun = "○";
     public const string Skipped = "⊘";
-    public const string Queued = "◌";
+
+    /// <summary>Static hourglass — a test (or, for a branch, its entire subtree) is selected to run but
+    /// hasn't started yet. Distinct from the animated <see cref="SpinnerFrame"/>, which means actively running.</summary>
+    public const string Queued = "⧗";
 
     /// <summary>Warning-notice glyph (1 cell) — phantom / unknown-runner / dead-opt-in / zero-tests.</summary>
     public const string Warning = "⚠";
@@ -72,7 +75,7 @@ public static class Glyphs
         if (node.AnyRunning) return (SpinnerFrame(tick), Ansi.Cyan);
         return node.BranchStatus switch
         {
-            TestStatus.Running => (SpinnerFrame(tick), Ansi.Cyan), // queued-but-not-started
+            TestStatus.Running => (Queued, Ansi.Cyan), // queued-but-not-started: hourglass, not the spinner
             TestStatus.Failed => (Failed, Ansi.Red),
             TestStatus.Passed => (Passed, Ansi.Green),
             TestStatus.Skipped => (Skipped, Ansi.Yellow),

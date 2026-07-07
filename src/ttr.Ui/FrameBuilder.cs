@@ -220,7 +220,7 @@ public static class FrameBuilder
         if (n.Passed > 0) parts.Add($"{n.Passed}✓");
         if (n.Skipped > 0) parts.Add($"{n.Skipped}⊘");
         if (n.Running > 0) parts.Add($"{n.Running}◍");
-        if (n.Queued > 0) parts.Add($"{n.Queued}◌");
+        if (n.Queued > 0) parts.Add($"{n.Queued}{Glyphs.Queued}");
         if (n.NotRun > 0 && n.Running == 0 && n.Queued == 0) parts.Add($"{n.NotRun}○");
         return parts.Count == 0 ? "" : string.Join(" ", parts);
     }

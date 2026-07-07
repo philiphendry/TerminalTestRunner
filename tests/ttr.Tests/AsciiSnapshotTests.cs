@@ -36,7 +36,7 @@ public class AsciiSnapshotTests
 
     // ttr's Unicode glyph vocabulary — none of these may survive an ASCII-tier render (they would mojibake on
     // a non-UTF-8 terminal). User content is never mapped, but the fake scenarios use only ASCII test names.
-    private const string UnicodeGlyphs = "✓✗○⊘◌◍⚠✖┌┐└┘─│↑↓←→↔·—§≥≤≈×•…⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+    private const string UnicodeGlyphs = "✓✗○⊘⧗◍⚠✖┌┐└┘─│↑↓←→↔·—§≥≤≈×•…⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
     [Fact]
     public void Ascii_frames_contain_no_unicode_glyphs()
