@@ -162,7 +162,7 @@ public static class FrameBuilder
             {
                 var row = rows[rowIndex];
                 var selected = s.Selection is { } sel && sel.Equals(row.Node.Id);
-                lines.Add(TreeRow(row, selected, treeFocused, s.ShowDurations, info.SpinnerTick, width, caps, s.Running));
+                lines.Add(TreeRow(row, selected, treeFocused, s.ShowDurations, info.SpinnerTick, width, caps));
             }
             else
             {
@@ -172,7 +172,7 @@ public static class FrameBuilder
         return lines;
     }
 
-    private static string TreeRow(FlatRow row, bool selected, bool treeFocused, bool showDur, int tick, int width, Caps caps, bool runActive)
+    private static string TreeRow(FlatRow row, bool selected, bool treeFocused, bool showDur, int tick, int width, Caps caps)
     {
         var node = row.Node;
         var durCol = showDur && width >= 28 ? 8 : 0;
@@ -183,7 +183,7 @@ public static class FrameBuilder
         var stalePrefix = caps.StalePrefix && Glyphs.IsStaleForDisplay(node) ? "~" : "";
         var nameCol = Math.Max(0, width - indentCells - 2 - stalePrefix.Length - countsCol - durCol);
 
-        var (glyph, color) = Glyphs.ForNode(node, tick, runActive);
+        var (glyph, color) = Glyphs.ForNode(node, tick);
         // Build state labels apply to a project node even before it has children (discovery gated on
         // build). Notice nodes and test leaves carry no counts.
         var counts = node.BuildPhase == BuildPhase.Building ? "building"

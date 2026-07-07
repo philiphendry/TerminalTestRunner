@@ -1,8 +1,8 @@
 ﻿ttr · watch · 3 tests · 0✓ 0✗ 0⊘ · running 0 · 0ms · watch: queued (change during run)              
-⠋ watch                                                                                           3⧗
-  ⠋ Watch.Sample.Tests                                                                            3⧗
-    ⠋ Watch.Sample                                                                                3⧗
-      ⠋ CalculatorTests                                                                           3⧗
+⧗ watch                                                                                           3⧗
+  ⧗ Watch.Sample.Tests                                                                            3⧗
+    ⧗ Watch.Sample                                                                                3⧗
+      ⧗ CalculatorTests                                                                           3⧗
         ⧗ Add_ReturnsSum                                                                            
         ⧗ Subtract_ReturnsDifference                                                                
         ⧗ Multiply_ReturnsProduct                                                                   

@@ -32,13 +32,13 @@ public static class Glyphs
     /// overrides the rollup so the diagnostic is visible), else the normal leaf/branch glyph. An
     /// <see cref="NoticeSeverity.Info"/> note does not override the glyph (it is not an alarm — plan §6.2).
     /// </summary>
-    public static (string Glyph, string Color) ForNode(TestNode node, int tick, bool runActive = false)
+    public static (string Glyph, string Color) ForNode(TestNode node, int tick)
     {
         if (node.BuildPhase == BuildPhase.Building) return (SpinnerFrame(tick), Ansi.Yellow);
         if (node.BuildPhase == BuildPhase.Failed) return (Failed, Ansi.Red);
         if (node.Notice is { Severity: NoticeSeverity.Error }) return (Error, Ansi.Red);
         if (node.Notice is { Severity: NoticeSeverity.Warning }) return (Warning, Ansi.Yellow);
-        var (glyph, color) = node.IsLeaf ? ForLeaf(node.Status, tick) : ForBranch(node, tick, runActive);
+        var (glyph, color) = node.IsLeaf ? ForLeaf(node.Status, tick) : ForBranch(node, tick);
         if (color != Ansi.Grey && IsStaleForDisplay(node)) color = Ansi.Grey;
         return (glyph, color);
     }
@@ -69,19 +69,13 @@ public static class Glyphs
         _ => (NotRun, Ansi.Grey),
     };
 
-    /// <summary>The leading glyph + colour for a branch, rolled up from its subtree. <paramref name="runActive"/>
-    /// is <see cref="AppState.Running"/>: a branch whose descendants are only Queued (none currently Running)
-    /// has genuine pending work while a run is live, so it shows the animated spinner — the tick advances only
-    /// during a run, so this never freezes. The static <see cref="Queued"/> hourglass is reserved for the
-    /// queued-but-no-run-active case (an idle pending state), so an in-flight run never leaves a parent looking
-    /// stopped between one test finishing and the next starting. The per-leaf Running/Queued distinction
-    /// (<see cref="ForLeaf"/>) is unaffected — an individual not-yet-started test still shows the hourglass.</summary>
-    public static (string Glyph, string Color) ForBranch(TestNode node, int tick, bool runActive)
+    /// <summary>The leading glyph + colour for a branch, rolled up from its subtree.</summary>
+    public static (string Glyph, string Color) ForBranch(TestNode node, int tick)
     {
         if (node.AnyRunning) return (SpinnerFrame(tick), Ansi.Cyan);
         return node.BranchStatus switch
         {
-            TestStatus.Running => runActive ? (SpinnerFrame(tick), Ansi.Cyan) : (Queued, Ansi.Cyan),
+            TestStatus.Running => (Queued, Ansi.Cyan), // queued-but-not-started: hourglass, not the spinner
             TestStatus.Failed => (Failed, Ansi.Red),
             TestStatus.Passed => (Passed, Ansi.Green),
             TestStatus.Skipped => (Skipped, Ansi.Yellow),
