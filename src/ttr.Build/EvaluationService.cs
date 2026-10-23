@@ -83,6 +83,8 @@ public sealed class EvaluationService
         var packages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in project.GetItems("PackageReference"))
             packages.Add(item.EvaluatedInclude);
+        // Transitive packages too: adapters often arrive via a metapackage (e.g. MSTest → MSTest.TestAdapter).
+        packages.UnionWith(AssetsFile.ReadPackageIds(project.GetPropertyValue("ProjectAssetsFile"), tfm));
 
         var optIns = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in TrackedOptIns)
