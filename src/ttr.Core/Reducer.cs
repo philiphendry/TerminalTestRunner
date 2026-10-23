@@ -436,8 +436,11 @@ public static class Reducer
                 return detailFocused ? DetailScroll(s, +DetailPage(s)) : Move(s, +Math.Max(1, s.Viewport));
             case ConsoleKey.Home: return detailFocused ? DetailScrollTo(s, 0) : MoveTo(s, 0);
             case ConsoleKey.End: return detailFocused ? DetailScrollTo(s, int.MaxValue) : MoveTo(s, int.MaxValue);
-            case ConsoleKey.RightArrow: return detailFocused ? s : ExpandOrDescend(s);
-            case ConsoleKey.LeftArrow: return detailFocused ? s : CollapseOrAscend(s);
+            // Shift+→/← apply to the whole subtree, so "collapse all, then → one level" works.
+            case ConsoleKey.RightArrow:
+                return detailFocused ? s : Shift(k) ? SetSubtreeExpansion(s, expand: true) : ExpandOrDescend(s);
+            case ConsoleKey.LeftArrow:
+                return detailFocused ? s : Shift(k) ? SetSubtreeExpansion(s, expand: false) : CollapseOrAscend(s);
             case ConsoleKey.Tab: return s.DetailVisible ? ToggleFocus(s) : s;
             case ConsoleKey.Escape: return s;
         }
@@ -515,24 +518,33 @@ public static class Reducer
         if (node is null || node.IsLeaf) return s;
 
         var currentlyExpanded = s.Expanded.Contains(node.Id);
-        ImmutableHashSet<TestCaseId> set;
-        if (!recursive)
-        {
-            set = currentlyExpanded ? s.Expanded.Remove(node.Id) : s.Expanded.Add(node.Id);
-        }
-        else
-        {
-            var target = !currentlyExpanded;
-            var builder = s.Expanded.ToBuilder();
-            foreach (var branch in BranchesInclusive(node))
-            {
-                if (target) builder.Add(branch.Id);
-                else builder.Remove(branch.Id);
-            }
-            set = builder.ToImmutable();
-        }
-        return SetExpansion(s, set);
+        if (recursive) return SetExpansion(s, WithSubtree(s.Expanded, node, !currentlyExpanded));
+        return SetExpansion(s, currentlyExpanded ? s.Expanded.Remove(node.Id) : s.Expanded.Add(node.Id));
     }
+
+    /// <summary>Shift+→/←: expand or collapse the selected node AND every descendant branch. Shift+← on a
+    /// leaf falls back to plain ← (jump to parent), so it stays a navigation key everywhere.</summary>
+    private static AppState SetSubtreeExpansion(AppState s, bool expand)
+    {
+        var (node, _) = Selected(s);
+        if (node is null) return s;
+        if (node.IsLeaf) return expand ? s : CollapseOrAscend(s);
+        var set = WithSubtree(s.Expanded, node, expand);
+        return set.SetEquals(s.Expanded) ? s : SetExpansion(s, set);
+    }
+
+    private static ImmutableHashSet<TestCaseId> WithSubtree(ImmutableHashSet<TestCaseId> expanded, TestNode node, bool expand)
+    {
+        var builder = expanded.ToBuilder();
+        foreach (var branch in BranchesInclusive(node))
+        {
+            if (expand) builder.Add(branch.Id);
+            else builder.Remove(branch.Id);
+        }
+        return builder.ToImmutable();
+    }
+
+    private static bool Shift(ConsoleKeyInfo k) => (k.Modifiers & ConsoleModifiers.Shift) != 0;
 
     /// <summary>Apply a new expansion set, rebuild rows, bump the version, and keep the selection in view.</summary>
     private static AppState SetExpansion(AppState s, ImmutableHashSet<TestCaseId> expanded)

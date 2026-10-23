@@ -136,6 +136,43 @@ public class ReducerTests
     }
 
     [Fact]
+    public void Shift_left_collapses_all_then_right_opens_only_one_level()
+    {
+        var s = Discover(Fresh(),
+            Id("N", "C1", "T1"), Id("N", "C2", "T2"));
+        var projectId = BranchId(TestNodeKind.Project, Project);
+        var nsId = BranchId(TestNodeKind.Namespace, Project, Tfm, "N");
+        var c1 = BranchId(TestNodeKind.Class, Project, Tfm, "N", "C1");
+
+        s = s with { Selection = projectId };
+        s = Feed(s, new AppEvent.KeyPressed(Key('\0', ConsoleKey.LeftArrow, shift: true)));
+        Assert.DoesNotContain(projectId, s.Expanded);
+        Assert.DoesNotContain(nsId, s.Expanded);
+        Assert.DoesNotContain(c1, s.Expanded);
+
+        // Plain → now opens just the project; descendants stay collapsed.
+        s = Feed(s, new AppEvent.KeyPressed(Key('\0', ConsoleKey.RightArrow)));
+        Assert.Contains(projectId, s.Expanded);
+        Assert.DoesNotContain(c1, s.Expanded);
+
+        // Shift+→ opens the whole subtree.
+        s = Feed(s, new AppEvent.KeyPressed(Key('\0', ConsoleKey.RightArrow, shift: true)));
+        Assert.Contains(nsId, s.Expanded);
+        Assert.Contains(c1, s.Expanded);
+        Assert.Equal(projectId, s.Selection);   // expanding never moves the selection
+    }
+
+    [Fact]
+    public void Shift_left_on_a_leaf_still_jumps_to_parent()
+    {
+        var s = Discover(Fresh(), Id("N", "C", "T1"));
+        var classId = BranchId(TestNodeKind.Class, Project, Tfm, "N", "C");
+        s = s with { Selection = Id("N", "C", "T1").Id };
+        s = Feed(s, new AppEvent.KeyPressed(Key('\0', ConsoleKey.LeftArrow, shift: true)));
+        Assert.Equal(classId, s.Selection);
+    }
+
+    [Fact]
     public void Arrow_navigation_moves_selection_and_clamps()
     {
         var s = Discover(Fresh(),

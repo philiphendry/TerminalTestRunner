@@ -9,6 +9,7 @@ public static class HelpRenderer
     [
         ("↑/↓  j/k", "Move selection"),
         ("→/←", "Expand / collapse (← on leaf → parent)"),
+        ("Shift+→/←", "Expand / collapse node AND all descendants"),
         ("PgUp/PgDn  Home/End", "Page / jump (tree or focused detail)"),
         ("e", "Toggle expand/collapse of node"),
         ("E  (Shift+E)", "Toggle node AND all descendants"),
