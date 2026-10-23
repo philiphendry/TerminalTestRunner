@@ -172,18 +172,22 @@ public class WatchReducerTests
     }
 
     [Fact]
-    public void Watch_rerun_request_under_failed_filter_reruns_only_failures()
+    public void Watch_rerun_under_failed_filter_runs_all_affected_so_new_failures_surface()
     {
+        // Regression: the rerun used to be narrowed to already-failed tests under 'f', so with nothing failing
+        // a watch cycle ran nothing and a test the edit had just broken never appeared.
         var s = Setup("Add", "Subtract");
         s = Finish(s, "Add", TestOutcome.Passed);
-        s = Finish(s, "Subtract", TestOutcome.Failed);
+        s = Finish(s, "Subtract", TestOutcome.Passed);
         s = Reducer.Reduce(s, new AppEvent.RunCompleted());
-        s = Press(s, Char('f'));                    // failed-only
+        s = Press(s, Char('f'));                    // failed-only, nothing failing → empty view
 
         s = Feed(s, new AppEvent.WatchRerunRequested([Proj]));
+        Assert.True(s.Running);
+        Assert.Equal(2, s.RunSubset.Count);
 
-        Assert.Single(s.RunSubset);
-        Assert.Equal(Id("N", "C", "Subtract").Id, s.RunSubset[0]);
+        s = Finish(s, "Add", TestOutcome.Failed);   // the edit broke Add
+        Assert.Contains(s.Rows, r => r.Node.Id.Equals(Id("N", "C", "Add").Id));
     }
 
     [Fact]

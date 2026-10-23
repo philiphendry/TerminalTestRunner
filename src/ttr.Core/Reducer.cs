@@ -193,10 +193,14 @@ public static class Reducer
         return NormalizeView(RebuildRows(s with { TreeVersion = s.TreeVersion + 1 }), prevIndex);
     }
 
-    /// <summary>Auto-rerun the affected test set after a watch cycle (plan §9, AC7): all leaves under the
-    /// affected projects, narrowed to failed-only when 'f' is active. Marks them Queued and launches a run —
-    /// or, if a run is already active, coalesces into the ONE consolidated follow-up (reusing the Phase 4
-    /// queue, AC6). Newly-added tests run in the same cycle (they are NotRun leaves under an affected project).</summary>
+    /// <summary>Auto-rerun the affected test set after a watch cycle (plan §9, AC7): ALL leaves under the
+    /// affected projects. Marks them Queued and launches a run — or, if a run is already active, coalesces into
+    /// the ONE consolidated follow-up (reusing the Phase 4 queue, AC6). Newly-added tests run in the same cycle
+    /// (they are NotRun leaves under an affected project).
+    /// Deliberate deviation from plan §9 ("narrowed to failed-only if 'f' is active"): under 'f' that narrowing
+    /// meant a test newly broken by the edit was never run, so it could never surface in the filtered view, and
+    /// every kept result went Stale with nothing to refresh it. 'f' stays a pure view filter here; manual r/R
+    /// still honour it (§11.4).</summary>
     private static AppState WatchRerunRequested(AppState s, AppEvent.WatchRerunRequested w)
     {
         if (!s.RunsEnabled) return s;
@@ -206,11 +210,9 @@ public static class Reducer
         {
             var project = s.Root.FindChild(path);
             if (project is null) continue;
-            foreach (var leaf in Leaves(project))
-                if (!s.FailedOnly || leaf.Status is TestStatus.Failed or TestStatus.Queued or TestStatus.Running)
-                    targets.Add(leaf);
+            targets.AddRange(Leaves(project));
         }
-        if (targets.Count == 0) return s;   // nothing to rerun (e.g. 'f' active and nothing failed)
+        if (targets.Count == 0) return s;   // nothing to rerun (the affected projects have no tests)
 
         var subset = targets.Select(l => l.Id).ToList();
         if (s.Running)
