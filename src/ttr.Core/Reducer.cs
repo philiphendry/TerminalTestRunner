@@ -886,7 +886,7 @@ public static class Reducer
                 TestCaseId.ForBranch(TestNodeKind.Method, id.Project, id.Tfm, id.Namespace, id.ClassName, id.Method),
                 id.Method, expanded, ref structural);
 
-        if (existing.IsLeaf && existing.TotalLeaves > 0)
+        if (existing.IsTestLeaf)
         {
             RemoveLeafFromRollups(existing);
             structural = true;   // a leaf became a branch — the flattened row set changes
@@ -954,7 +954,7 @@ public static class Reducer
     /// VSTest ActiveTests reporting the base FQN after its rows materialised) never corrupts the counters.</summary>
     private static void ApplyStatus(TestNode leaf, TestStatus next)
     {
-        if (leaf.Children.Count > 0) return;
+        if (!leaf.IsTestLeaf) return;
         var prev = leaf.Status;
         if (prev == next) return;
         for (TestNode? n = leaf; n is not null; n = n.Parent)
@@ -970,7 +970,7 @@ public static class Reducer
     /// branch and when the flag already holds — so it is safe to call unconditionally on any run/rebuild event.</summary>
     private static void SetStale(TestNode leaf, bool stale)
     {
-        if (leaf.Children.Count > 0) return;
+        if (!leaf.IsTestLeaf) return;
         var current = leaf.StaleLeaves > 0;
         if (current == stale) return;
         var delta = stale ? 1 : -1;
@@ -1053,7 +1053,9 @@ public static class Reducer
         if (node.Kind == TestNodeKind.Notice) yield break;   // diagnostics are not test leaves
         if (node.IsLeaf)
         {
-            yield return node;
+            // A childless structural node (a Project still building, before discovery) is not a test:
+            // queueing it would leak a Queued count into its ancestors that no RunCompleted sweep clears.
+            if (node.IsTestLeaf) yield return node;
             yield break;
         }
         foreach (var child in node.Children)

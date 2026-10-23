@@ -121,4 +121,28 @@ public class BackendReducerTests
         Assert.Equal(s.RunGeneration, after.RunGeneration);   // no run launched
         Assert.Equal("runs arrive in Phase 4", after.Toast);
     }
+
+    [Fact]
+    public void Rerun_pressed_before_discovery_never_queues_the_childless_project_node()
+    {
+        // Regression: 'R' while the project was still building found the (childless) Project node as a
+        // "leaf" and queued it; once discovery made it a branch no sweep cleared it, leaving a permanent
+        // Queued count (cyan spinner + "1◌") on the project and solution rows.
+        var s = Feed(AppState.Initial("backend", runsEnabled: true),
+            new AppEvent.ProjectRegistered(Proj, "Api.Tests", ["net10.0"], RunnerKind.VsTest),
+            new AppEvent.BuildStarted(Proj));
+        s = Press(s, Char('R'));
+        s = Feed(s,
+            new AppEvent.BuildSucceeded(Proj),
+            new AppEvent.TestsDiscovered([ProjId("net10.0", "T1")]),
+            new AppEvent.TestFinished(ProjId("net10.0", "T1"), TestOutcome.Passed, TimeSpan.FromMilliseconds(1)),
+            new AppEvent.RunCompleted());
+
+        var project = Assert.Single(s.Root.Children);
+        Assert.Equal(0, project.Queued);
+        Assert.Equal(0, s.Root.Queued);
+        Assert.Equal(1, s.Root.Passed);
+        Assert.Equal(s.Root.TotalLeaves, s.Root.Counts.Sum());
+        Assert.Equal(TestStatus.Passed, project.BranchStatus);
+    }
 }

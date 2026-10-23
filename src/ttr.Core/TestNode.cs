@@ -24,6 +24,11 @@ public sealed class TestNode
 
     public bool IsLeaf => Children.Count == 0;
 
+    /// <summary>A real test leaf: childless AND registered in the rollups (it counts itself in
+    /// <see cref="TotalLeaves"/>). A childless structural node — a Project before discovery, an empty TFM, a
+    /// promoted Method — is <see cref="IsLeaf"/> but never a test, so it must never take a status.</summary>
+    public bool IsTestLeaf => IsLeaf && TotalLeaves > 0;
+
     /// <summary>Own status — meaningful for leaves; branches derive display state from rollups.</summary>
     public TestStatus Status { get; set; } = TestStatus.NotRun;
 
